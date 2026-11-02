@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<!--
+  portrait-webgpu-base entry.
+  DOM: #shell > #viewport > #app > #stage > (canvas | #ui-root)
+  See AGENTS.md · docs/ENGINEERING.md
+-->
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>Portrait WebGPU Base</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="shell">
+      <div id="viewport">
+        <div id="app">
+          <div id="stage" aria-label="game-stage">
+            <div id="ui-root">
+              <header>
+                <p class="eyebrow">Robust base · niantu adapt + shell packaging</p>
+                <h1>Three.js WebGPU Portrait</h1>
+                <p id="status" class="status">booting…</p>
+              </header>
+              <section class="panel">
+                <p class="panel-title">震动测试（必须真机 App，模拟器多数不震）</p>
+                <button type="button" class="haptic-primary" data-haptic="impact">
+                  点我震动
+                </button>
+                <div class="row">
+                  <button type="button" data-haptic="tap">轻点 transient</button>
+                  <button type="button" data-haptic="impact">impact</button>
+                  <button type="button" data-haptic="start">连续震</button>
+                  <button type="button" data-haptic="stop">停止</button>
+                </div>
+                <p id="haptic-log" class="log">请先打到真机 App，再点「点我震动」</p>
+              </section>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="device-switcher" aria-label="device-viewport-switcher">
+      <button type="button" data-device="phone">手机竖屏</button>
+      <button type="button" data-device="pad">Pad 竖屏</button>
+    </div>
+    <div id="device-label"></div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

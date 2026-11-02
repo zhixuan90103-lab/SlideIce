@@ -1,0 +1,27 @@
+{
+  "name": "portrait-webgpu-base",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Robust portrait shell: TS + Three WebGPU + Vite + Capacitor iOS. Merges niantu adapt + three-webgpu-cap-shell packaging/docs/haptics workflow.",
+  "scripts": {
+    "dev": "vite --host --port 5190",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host --port 5190",
+    "cap:sync": "npm run build && npx cap sync ios",
+    "cap:open": "npx cap open ios",
+    "ios": "npm run cap:sync && npm run cap:open",
+    "ios:bootstrap": "node scripts/bootstrap-ios.mjs"
+  },
+  "dependencies": {
+    "@capacitor/core": "^8.1.0",
+    "@capacitor/ios": "^8.1.0",
+    "three": "^0.178.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.1.0",
+    "@types/three": "^0.178.0",
+    "typescript": "~5.8.3",
+    "vite": "^6.0.0"
+  }
+}

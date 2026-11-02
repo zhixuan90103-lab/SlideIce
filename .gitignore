@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+.npm
+.npm-cache
+.env
+.env.*
+ios/App/App/public
+ios/App/Pods
+ios/App/build
+ios/DerivedData
+*.xcuserstate
+xcuserdata/
+.idea/
+.vscode/
+*.tsbuildinfo

@@ -1,0 +1,290 @@
+:root {
+  color-scheme: dark;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+
+  --design-w: 390;
+  --design-h: 844;
+  --shell-bg: #12141c;
+  --stage-bg: #0b1020;
+
+  /* Desktop sim; native overrides with env() */
+  --safe-top: 59px;
+  --safe-right: 0px;
+  --safe-bottom: 34px;
+  --safe-left: 0px;
+  --ui-pad-top: 8px;
+  --ui-pad-x: 14px;
+  --ui-pad-bottom: 10px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 100dvh;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: var(--shell-bg);
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Outer letterbox / preview host */
+#shell {
+  position: relative;
+  width: 100%;
+  min-height: 100dvh;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--shell-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#viewport {
+  position: relative;
+  overflow: hidden;
+  background: #000;
+  flex-shrink: 0;
+}
+
+#shell.native #viewport,
+#shell.fill #viewport {
+  width: 100%;
+  height: 100%;
+}
+
+#shell.preview #viewport {
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.12),
+    0 12px 40px rgba(0, 0, 0, 0.55);
+  border-radius: 12px;
+}
+
+#app {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+}
+
+/* Fixed design stage — only this node is scaled */
+#stage {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 390px;
+  height: 844px;
+  overflow: hidden;
+  background: var(--stage-bg);
+  will-change: transform;
+}
+
+#stage canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+  outline: none;
+  touch-action: none;
+}
+
+/**
+ * All interactive / readable UI lives here (design coords).
+ * Safe padding clears Dynamic Island + home indicator.
+ */
+#ui-root {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding-top: calc(var(--safe-top) + var(--ui-pad-top));
+  padding-right: calc(var(--safe-right) + var(--ui-pad-x));
+  padding-bottom: calc(var(--safe-bottom) + var(--ui-pad-bottom));
+  padding-left: calc(var(--safe-left) + var(--ui-pad-x));
+}
+
+body.debug-safe-area #ui-root::before {
+  content: '';
+  pointer-events: none;
+  position: absolute;
+  left: var(--safe-left);
+  right: var(--safe-right);
+  top: var(--safe-top);
+  bottom: var(--safe-bottom);
+  border: 1px dashed rgba(56, 189, 248, 0.45);
+  border-radius: 12px;
+  z-index: 0;
+}
+
+/* Native: real safe-area env (contentInset: never) */
+html.native-app,
+body.native-app {
+  background: var(--stage-bg);
+  --safe-top: constant(safe-area-inset-top);
+  --safe-right: constant(safe-area-inset-right);
+  --safe-bottom: constant(safe-area-inset-bottom);
+  --safe-left: constant(safe-area-inset-left);
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+}
+
+body.native-app #shell {
+  background: var(--stage-bg);
+}
+
+header {
+  position: relative;
+  z-index: 1;
+}
+
+header h1 {
+  margin: 4px 0 0;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #f8fafc;
+}
+
+.eyebrow {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.65;
+  color: #e2e8f0;
+}
+
+.status {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  opacity: 0.85;
+  white-space: pre-wrap;
+  color: #e2e8f0;
+}
+
+.panel {
+  position: relative;
+  z-index: 1;
+  pointer-events: auto;
+  background: rgba(15, 23, 42, 0.78);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 14px;
+  padding: 12px;
+  backdrop-filter: blur(10px);
+}
+
+.panel-title {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+button {
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  padding: 10px 12px;
+  min-height: 44px;
+  background: #334155;
+  color: #f8fafc;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:active {
+  transform: scale(0.98);
+  background: #475569;
+}
+
+.haptic-primary {
+  width: 100%;
+  margin-bottom: 10px;
+  min-height: 56px;
+  border-radius: 16px;
+  font-size: 18px;
+  letter-spacing: 0.04em;
+  background: #7c3aed;
+}
+
+.haptic-primary:active {
+  background: #6d28d9;
+}
+
+.log {
+  margin: 10px 0 0;
+  font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  opacity: 0.75;
+  white-space: pre-wrap;
+  color: #cbd5e1;
+}
+
+/* Desktop device switcher (outside design stage — allowed exception) */
+#device-switcher {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 10000;
+  display: none;
+  gap: 6px;
+}
+
+#device-switcher.visible {
+  display: flex;
+}
+
+#device-switcher button {
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(20, 20, 28, 0.88);
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 12px;
+  min-height: 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  backdrop-filter: blur(8px);
+}
+
+#device-switcher button.active {
+  background: rgba(80, 120, 255, 0.35);
+  border-color: rgba(140, 170, 255, 0.7);
+  color: #fff;
+}
+
+#device-label {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 10000;
+  display: none;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  pointer-events: none;
+}
+
+#device-label.visible {
+  display: block;
+}
