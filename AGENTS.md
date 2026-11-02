@@ -5,8 +5,10 @@
 
 ## 一句话
 
-**TypeScript + Three.js WebGPU + Vite + Capacitor iOS** 竖屏手游稳健底座。  
+**TypeScript + Three.js WebGPU + Vite + Capacitor iOS** 竖屏手游底座。  
 设计空间固定 **390×844**，contain letterbox；桌面可切手机/Pad 预览；`base: './'` 保证真机资源路径。
+
+当前玩法规范是 [docs/GAME.md](docs/GAME.md)。第一关在 `src/game/`，`src/main.ts` 只负责启动。开发地址 `http://127.0.0.1:5193/`。
 
 ## 入口地图
 
@@ -50,7 +52,7 @@
 
 ```bash
 npm install
-npm run dev           # http://127.0.0.1:5190/
+npm run dev           # http://127.0.0.1:5193/
 npm run build
 npm run cap:sync
 npm run ios:bootstrap # 首次 / 修插件
@@ -62,13 +64,13 @@ npm run ios
 
 ## 业务怎么加
 
-- 玩法：改 `src/main.ts` 或 `src/game/*`  
+- 玩法：按 [docs/GAME.md](docs/GAME.md) 写入 `src/game/`，`src/main.ts` 只负责启动  
 - 保留：adapt / create-renderer / haptics / plugins / `base`  
-- 触控：`clientToDesign` + 忽略 letterbox 外  
-- 音效：按 `docs/AUDIO.md` 接入；禁止热路径 `new Audio()` / 每发一次桥  
+- 触控：舞台矩形换设计坐标（见 GAME.md §3）；未抓住时丢掉设计区外的点  
+- 音效：按 `docs/AUDIO.md` 接入；禁止热路径 `new Audio()` / 每发一次桥。第一关不接  
 
 ## 刻意不做
 
-- 具体游戏玩法（demo 立方体可删）  
+- 在规范外另加玩法（倒计时、生命、广告、第二套操作）  
 - Android（可后加）  
 - WebGL 静默回退  

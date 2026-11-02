@@ -148,61 +148,6 @@ body.native-app #shell {
   background: var(--stage-bg);
 }
 
-header {
-  position: relative;
-  z-index: 1;
-}
-
-header h1 {
-  margin: 4px 0 0;
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: #f8fafc;
-}
-
-.eyebrow {
-  margin: 0;
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  opacity: 0.65;
-  color: #e2e8f0;
-}
-
-.status {
-  margin: 8px 0 0;
-  font-size: 12px;
-  line-height: 1.4;
-  opacity: 0.85;
-  white-space: pre-wrap;
-  color: #e2e8f0;
-}
-
-.panel {
-  position: relative;
-  z-index: 1;
-  pointer-events: auto;
-  background: rgba(15, 23, 42, 0.78);
-  border: 1px solid rgba(148, 163, 184, 0.28);
-  border-radius: 14px;
-  padding: 12px;
-  backdrop-filter: blur(10px);
-}
-
-.panel-title {
-  margin: 0 0 10px;
-  font-size: 13px;
-  font-weight: 600;
-  color: #f1f5f9;
-}
-
-.row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
 button {
   appearance: none;
   border: 0;
@@ -219,28 +164,6 @@ button {
 button:active {
   transform: scale(0.98);
   background: #475569;
-}
-
-.haptic-primary {
-  width: 100%;
-  margin-bottom: 10px;
-  min-height: 56px;
-  border-radius: 16px;
-  font-size: 18px;
-  letter-spacing: 0.04em;
-  background: #7c3aed;
-}
-
-.haptic-primary:active {
-  background: #6d28d9;
-}
-
-.log {
-  margin: 10px 0 0;
-  font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
-  opacity: 0.75;
-  white-space: pre-wrap;
-  color: #cbd5e1;
 }
 
 /* Desktop device switcher (outside design stage — allowed exception) */

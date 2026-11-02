@@ -4,7 +4,7 @@
 
 ## 1. 定位
 
-可复制的 **竖屏 WebGPU 手游底座**：能 dev、能 build、能真机、能震动、桌面≈手机/Pad。不含具体玩法（demo 可删）。
+可复制的 **竖屏 WebGPU 手游底座**：能 dev、能 build、能真机、能震动、桌面≈手机/Pad。玩法规范在 [GAME.md](./GAME.md)。第一关在 `src/game/`，`src/main.ts` 只负责启动。
 
 ## 2. 目录
 
@@ -14,10 +14,11 @@ portrait-webgpu-base/
 ├── README.md
 ├── docs/
 ├── index.html
-├── vite.config.ts          # base: './' · port 5190
+├── vite.config.ts          # base: './' · port 5193
 ├── capacitor.config.ts     # contentInset never · scrollEnabled false
 ├── src/
-│   ├── main.ts             # demo（可替换）
+│   ├── main.ts             # 启动舞台，玩法在 game/
+│   ├── game/               # 第一关，见 GAME.md
 │   ├── create-renderer.ts
 │   ├── style.css
 │   ├── adapt/
@@ -37,7 +38,7 @@ portrait-webgpu-base/
 |----|-----|------|
 | `base` | `'./'` | Capacitor 相对路径 |
 | `outDir` | `dist` | = webDir |
-| `port` | `5190` | 固定端口 |
+| `port` | `5193` | 固定端口 |
 | `target` | `es2022` | WebGPU |
 
 ### Capacitor

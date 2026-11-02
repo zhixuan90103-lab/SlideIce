@@ -4,7 +4,7 @@
 
 | 命令 | 结果 |
 |------|------|
-| `npm run dev` | http://127.0.0.1:5190/ |
+| `npm run dev` | http://127.0.0.1:5193/ |
 | `npm run build` | `tsc` 检查 + `dist/`（相对路径） |
 | `npm run cap:sync` | build + cap sync ios |
 | `npm run ios:bootstrap` | add ios + 拷插件 + 改 storyboard **和 SceneDelegate** + pbx + sync |

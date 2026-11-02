@@ -5,9 +5,9 @@
   "type": "module",
   "description": "Robust portrait shell: TS + Three WebGPU + Vite + Capacitor iOS. Merges niantu adapt + three-webgpu-cap-shell packaging/docs/haptics workflow.",
   "scripts": {
-    "dev": "vite --host --port 5190",
+    "dev": "vite --host --port 5193",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview --host --port 5190",
+    "preview": "vite preview --host --port 5193",
     "cap:sync": "npm run build && npx cap sync ios",
     "cap:open": "npx cap open ios",
     "ios": "npm run cap:sync && npm run cap:open",
