@@ -53,7 +53,7 @@ function praiseSize(text: string): { w: number; h: number } {
   return { w: word.drawW * WORD_POP, h: word.drawH * WORD_POP + WORD_SHADOW }
 }
 
-function placePraise(x: number, y: number, text: string): { x: number; y: number; below: boolean } {
+function placePraise(x: number, y: number, text: string): { x: number; y: number } {
   const { w, h } = praiseSize(text)
   const halfW = w / 2
   const halfH = h / 2
@@ -63,11 +63,11 @@ function placePraise(x: number, y: number, text: string): { x: number; y: number
   const minY = PRAISE_EDGE + halfH
   const maxY = DESIGN_HEIGHT - PRAISE_EDGE - halfH
   const above = y - PRAISE_LIFT
-  if (above - PRAISE_RISE >= minY && above <= maxY) return { x: cx, y: above, below: false }
+  if (above - PRAISE_RISE >= minY && above <= maxY) return { x: cx, y: above }
   let below = y + PRAISE_LIFT
   if (below + PRAISE_RISE > maxY) below = maxY - PRAISE_RISE
   if (below < minY) below = minY
-  return { x: cx, y: below, below: true }
+  return { x: cx, y: below }
 }
 
 const praiseNodes: HTMLDivElement[] = []
@@ -78,7 +78,7 @@ function takePraiseNode(host: HTMLElement): HTMLDivElement {
   const node = document.createElement('div')
   node.addEventListener('animationend', (event) => {
     if (event.target !== node) return
-    if (event.animationName !== 'praise-rise' && event.animationName !== 'praise-drop') return
+    if (event.animationName !== 'praise-rise') return
     node.remove()
   })
   praiseNodes.push(node)

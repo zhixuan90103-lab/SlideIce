@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { Capacitor } from '@capacitor/core';
 import { FRAME_DIST, frameDistance, look } from './game/look';
-import { mountWoodGame, type WoodGame } from './game/play';
+import { mountSlideGame, type SlideGame } from './game/play';
 import {
   DESIGN_HEIGHT,
   DESIGN_WIDTH,
@@ -23,7 +23,7 @@ import {
 import { applyNativeClass, applySafeAreaCssVars } from './adapt/safeArea';
 import { createRenderer, resizeToDesign } from './create-renderer';
 
-function mountLookTune(camera: THREE.PerspectiveCamera, game: WoodGame): void {
+function mountLookTune(camera: THREE.PerspectiveCamera, game: SlideGame): void {
   const root = document.getElementById('ui-root');
   if (!root) return;
   const wrap = document.createElement('div');
@@ -164,7 +164,7 @@ async function boot(): Promise<void> {
     resizeToDesign(renderer);
   };
 
-  let game: WoodGame | null = null;
+  let game: SlideGame | null = null;
   let last = performance.now();
 
   preview = mountDevicePreview(shell, viewportEl, () => {
@@ -187,7 +187,7 @@ async function boot(): Promise<void> {
     log();
   }
 
-  game = mountWoodGame(scene, stage, () => latestLayout);
+  game = mountSlideGame(scene, stage, () => latestLayout);
   look.topZ = game.setPieceHeight(40);
   look.pitch = -15;
   applyCamera(camera);

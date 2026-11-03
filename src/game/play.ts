@@ -8,9 +8,10 @@
 
 import * as THREE from 'three'
 import { DESIGN_HEIGHT, DESIGN_WIDTH, type StageLayout } from '../adapt/design'
+import { mountHint } from './hint'
 import { freshPraise, notePraiseClear, showPraise } from './praise'
 import { SHATTER, disposeShatter, makeShatter, stepShatters, type Shatter } from './shatter'
-import { centerInGrid, mountStage, type StagePiece } from './stage'
+import { centerInGrid, hitsWall, mountStage, type StagePiece } from './stage'
 
 type Gesture = {
   id: number
@@ -19,7 +20,7 @@ type Gesture = {
   y: number
 }
 
-export type WoodGame = {
+export type SlideGame = {
   update(dt: number): void
   dispose(): void
   /** Kept so the camera aim stays where main.ts left it. */
@@ -37,11 +38,11 @@ export type WoodGame = {
   setCube(size: number, corner: number, edge: number): void
 }
 
-export function mountWoodGame(
+export function mountSlideGame(
   scene: THREE.Scene,
   stage: HTMLElement,
   getLayout: () => StageLayout | null,
-): WoodGame {
+): SlideGame {
   const stageLook = mountStage(scene)
   const pieces = stageLook.pieces
   const lifts = new Map<StagePiece, number>()
@@ -52,6 +53,7 @@ export function mountWoodGame(
   let held: StagePiece | null = null
   const shatters: Shatter[] = []
   const praise = freshPraise()
+  const hint = mountHint()
 
   const designOf = (event: PointerEvent): { x: number; y: number } | null => {
     const layout = getLayout()
@@ -124,7 +126,10 @@ export function mountWoodGame(
       return height
     },
     update(dt) {
-      stepShatters(shatters, -DESIGN_HEIGHT - SHATTER.chip, dt)
+      const ready = held && !centerInGrid(held.mesh.position.x, held.mesh.position.y) ? [held.mesh] : []
+    hint.set(ready)
+    hint.step(dt)
+    stepShatters(shatters, -DESIGN_HEIGHT - SHATTER.chip, dt)
       for (let i = shatters.length - 1; i >= 0; i--) {
         if (!shatters[i].dead) continue
         disposeShatter(shatters[i])
@@ -189,7 +194,9 @@ function moveAxis(piece: StagePiece, dx: number, dy: number, others: readonly St
   if (amount === 0) return 0
   const ox = piece.mesh.position.x
   const oy = piece.mesh.position.y
-  const overlapsAt = (t: number) => overlaps(piece, ox + dx * t, oy + dy * t, others)
+  const overlapsAt = (t: number) =>
+    overlaps(piece, ox + dx * t, oy + dy * t, others) ||
+    hitsWall(piece.locals, piece.half, ox + dx * t, oy + dy * t)
   if (overlapsAt(0)) return 0
   if (!overlapsAt(1)) {
     piece.mesh.position.x = ox + dx

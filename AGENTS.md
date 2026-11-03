@@ -48,6 +48,7 @@
 6. **Pad 只改外层视口**，不改 `DESIGN_*`  
 7. **改 Swift 改 `plugins/native-haptics/`** 再 `ios:bootstrap`；震动接线见 `docs/HAPTICS.md`。Capacitor 8 的 `SceneDelegate` 必须 `rootViewController = BridgeViewController()`（默认 `CAPBridgeViewController` 不会注册插件）。不要用 JS `prepare()` 判断是否接上；真机 HUD 看 `plugin: true` + 点「点我震动」。  
 8. **无 WebGPU 则明确失败**，不静默 WebGL  
+9. **操作优先** — 玩家操作的反馈是第一优先级。动画不能挡住操作，播放中的动画可以被打断。见 [docs/GAME.md](docs/GAME.md) §0
 
 ## 命令
 
@@ -68,7 +69,7 @@ npm run ios
 - 玩法：按 [docs/GAME.md](docs/GAME.md) 写入 `src/game/`，`src/main.ts` 只负责启动  
 - 画面：按 [docs/STAGE.md](docs/STAGE.md)。格子缝保持 4，不随底板拉伸  
 - 保留：adapt / create-renderer / haptics / plugins / `base`  
-- 触控：舞台矩形换设计坐标（见 GAME.md §3）；未抓住时丢掉设计区外的点  
+- 触控：舞台矩形换设计坐标（见 GAME.md §2）；未抓住时丢掉设计区外的点。操作优先于动画（GAME.md §0）
 - 音效：按 `docs/AUDIO.md` 接入；禁止热路径 `new Audio()` / 每发一次桥。第一关不接  
 
 ## 刻意不做

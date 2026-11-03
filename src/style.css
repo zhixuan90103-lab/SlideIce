@@ -281,12 +281,6 @@ button:active {
   will-change: transform, opacity;
 }
 
-.praise.is-below {
-  animation:
-    praise-drop 500ms linear forwards,
-    praise-fade 500ms linear forwards;
-}
-
 .praise svg {
   display: block;
   overflow: visible;
@@ -328,21 +322,6 @@ button:active {
   }
   100% {
     transform: translate3d(calc(-50% + 4px), calc(-50% - 28px), 0);
-  }
-}
-
-@keyframes praise-drop {
-  0% {
-    transform: translate3d(-50%, -50%, 0);
-  }
-  30% {
-    transform: translate3d(calc(-50% + 1px), calc(-50% + 6px), 0);
-  }
-  62% {
-    transform: translate3d(calc(-50% + 2px), calc(-50% + 14px), 0);
-  }
-  100% {
-    transform: translate3d(calc(-50% + 4px), calc(-50% + 28px), 0);
   }
 }
 

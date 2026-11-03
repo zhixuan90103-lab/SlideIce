@@ -21,7 +21,7 @@ npm run dev
 # → http://127.0.0.1:5193/
 ```
 
-应看到：桌面手机框、5×5 六色滑块、右上角 **手机/Pad** 切换。规则在 [docs/GAME.md](./docs/GAME.md)，画面在 [docs/STAGE.md](./docs/STAGE.md)。
+应看到：桌面手机框、5×5 六色滑块、左/右/下三面墙（上方敞开）、右上角 **手机/Pad** 切换。规则在 [docs/GAME.md](./docs/GAME.md)，画面在 [docs/STAGE.md](./docs/STAGE.md)。
 
 ## 合并了什么
 

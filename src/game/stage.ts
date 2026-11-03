@@ -18,6 +18,7 @@ import {
   SHADOW_OPACITY,
   SHADOW_Z,
   SKY,
+  TRAY_BEVEL,
   TRAY_BEVEL_SIZE,
   TRAY_LIP,
   TRAY_MARGIN,
@@ -58,6 +59,23 @@ export type StageRig = {
 /** Piece center is inside the 5×5 cell area. World x right, world y up. */
 export function centerInGrid(x: number, y: number): boolean {
   return x >= ORIGIN_X && x <= ORIGIN_X + BOARD && y <= -ORIGIN_Y && y >= -(ORIGIN_Y + BOARD)
+}
+
+/** Left, right, and bottom walls. The top stays open. */
+export function hitsWall(locals: readonly { x: number; y: number }[], half: number, x: number, y: number): boolean {
+  const size = half * 2
+  const opening = BOARD - (CELL - size) + TRAY_MARGIN * 2
+  const cx = ORIGIN_X + BOARD / 2
+  const cy = -(ORIGIN_Y + BOARD / 2)
+  const left = cx - opening / 2
+  const right = cx + opening / 2
+  const bottom = cy - opening / 2
+  for (const local of locals) {
+    if (x + local.x - half < left) return true
+    if (x + local.x + half > right) return true
+    if (y + local.y - half < bottom) return true
+  }
+  return false
 }
 
 export function mountStage(scene: THREE.Scene): StageRig {
@@ -125,7 +143,11 @@ export function mountStage(scene: THREE.Scene): StageRig {
   floor.castShadow = true
   floor.receiveShadow = true
   floor.position.set(ORIGIN_X + BOARD / 2, -(ORIGIN_Y + BOARD / 2), floorZ())
-  scene.add(floor, makeGrid())
+  const wall = new THREE.Mesh(new THREE.BufferGeometry(), boardMat)
+  wall.castShadow = true
+  wall.receiveShadow = true
+  wall.position.set(ORIGIN_X + BOARD / 2, -(ORIGIN_Y + BOARD / 2), FLOOR_TOP + TRAY_BEVEL)
+  scene.add(floor, wall, makeGrid())
 
   const pieces: StagePiece[] = LEVEL.map((piece, index) => {
     const mesh = new THREE.Mesh(new THREE.BufferGeometry(), pieceMats[index])
@@ -156,6 +178,8 @@ export function mountStage(scene: THREE.Scene): StageRig {
     }
     floor.geometry.dispose()
     floor.geometry = floorGeometry(size, corner, edge)
+    wall.geometry.dispose()
+    wall.geometry = wallGeometry(size, corner, edge)
   }
   placeCube(look.size, look.corner, look.edge)
 
@@ -278,6 +302,44 @@ function floorGeometry(size: number, corner: number, edge: number): THREE.Extrud
     bevelThickness: FLOOR_BEVEL,
     bevelSize: FLOOR_BEVEL_SIZE,
     bevelSegments: 6,
+  })
+}
+
+function wallGeometry(size: number, corner: number, edge: number): THREE.ExtrudeGeometry {
+  const span = traySpans(size, corner, edge)
+  const o = span.outer / 2
+  const lip = TRAY_LIP
+  const inner = o - lip
+  // Bottom corners share the floor's center. The open ends stay a flat head:
+  // each corner radius stays below half the lip, so the two arcs cannot meet as a semicircle.
+  const outerRadius = Math.min(span.outerRadius, o - lip - 1)
+  const innerRadius = Math.max(0.5, outerRadius - lip)
+  const cap = Math.min(Math.max(0.5, corner), lip / 2 - 2)
+  const shape = new THREE.Shape()
+  shape.moveTo(-inner, o - cap)
+  shape.absarc(-inner - cap, o - cap, cap, 0, Math.PI / 2, false)
+  shape.lineTo(-o + cap, o)
+  shape.absarc(-o + cap, o - cap, cap, Math.PI / 2, Math.PI, false)
+  shape.lineTo(-o, -o + outerRadius)
+  shape.absarc(-o + outerRadius, -o + outerRadius, outerRadius, Math.PI, Math.PI * 1.5, false)
+  shape.lineTo(o - outerRadius, -o)
+  shape.absarc(o - outerRadius, -o + outerRadius, outerRadius, Math.PI * 1.5, Math.PI * 2, false)
+  shape.lineTo(o, o - cap)
+  shape.absarc(o - cap, o - cap, cap, 0, Math.PI / 2, false)
+  shape.lineTo(inner + cap, o)
+  shape.absarc(inner + cap, o - cap, cap, Math.PI / 2, Math.PI, false)
+  shape.lineTo(inner, -inner + innerRadius)
+  shape.absarc(inner - innerRadius, -inner + innerRadius, innerRadius, 0, -Math.PI / 2, true)
+  shape.lineTo(-inner + innerRadius, -inner)
+  shape.absarc(-inner + innerRadius, -inner + innerRadius, innerRadius, -Math.PI / 2, Math.PI, true)
+  shape.closePath()
+  return new THREE.ExtrudeGeometry(shape, {
+    depth: Math.max(1, size - TRAY_BEVEL),
+    bevelEnabled: true,
+    bevelThickness: TRAY_BEVEL,
+    bevelSize: TRAY_BEVEL_SIZE,
+    bevelSegments: 4,
+    curveSegments: 12,
   })
 }
 
