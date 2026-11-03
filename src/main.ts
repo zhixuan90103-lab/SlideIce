@@ -200,6 +200,7 @@ async function boot(): Promise<void> {
     last = now;
     game?.update(dt);
     renderer.render(scene, camera);
+    game?.renderOverlay(renderer, camera);
   });
 
   window.addEventListener(

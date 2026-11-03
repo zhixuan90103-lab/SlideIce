@@ -11,17 +11,23 @@ import { DESIGN_HEIGHT, DESIGN_WIDTH, type StageLayout } from '../adapt/design'
 import { mountHint } from './hint'
 import { freshPraise, notePraiseClear, showPraise } from './praise'
 import { SHATTER, disposeShatter, makeShatter, stepShatters, type Shatter } from './shatter'
-import { centerInGrid, hitsWall, mountStage, type StagePiece } from './stage'
+import { freshContact, noteSteps, resetContact, stepContact, type Contact } from './contact'
+import { filterFinger, followFinger, pieceAt, seedFinger, type FingerFilter } from './slide'
+import { centerInGrid, mountStage, type StagePiece } from './stage'
 
 type Gesture = {
   id: number
   piece: StagePiece
-  x: number
-  y: number
+  filter: FingerFilter
 }
 
 export type SlideGame = {
   update(dt: number): void
+  /** Draw strokes after the blocks, masked only by their own piece. */
+  renderOverlay(
+    renderer: { autoClear: boolean; clearDepth(): void; render(scene: THREE.Scene, camera: THREE.Camera): void },
+    camera: THREE.Camera,
+  ): void
   dispose(): void
   /** Kept so the camera aim stays where main.ts left it. */
   setPieceHeight(height: number): number
@@ -54,7 +60,7 @@ export function mountSlideGame(
   const shatters: Shatter[] = []
   const praise = freshPraise()
   const hint = mountHint()
-
+  const contact: Contact = freshContact()
   const designOf = (event: PointerEvent): { x: number; y: number } | null => {
     const layout = getLayout()
     if (!layout) return null
@@ -68,35 +74,13 @@ export function mountSlideGame(
   const inDesign = (x: number, y: number) =>
     x >= 0 && y >= 0 && x <= DESIGN_WIDTH && y <= DESIGN_HEIGHT
 
-  const onDown = (event: PointerEvent) => {
-    if (ended || gesture) return
-    if (event.button !== 0) return
-    const point = designOf(event)
-    if (!point || !inDesign(point.x, point.y)) return
-    const hit = pieceAt(point.x, point.y, pieces)
-    if (!hit) return
-    stage.setPointerCapture(event.pointerId)
-    held = hit
-    gesture = { id: event.pointerId, piece: hit, x: point.x, y: point.y }
-  }
-
-  const onMove = (event: PointerEvent) => {
-    if (!gesture || event.pointerId !== gesture.id) return
-    const point = designOf(event)
-    if (!point) return
-    const dx = point.x - gesture.x
-    const dy = -(point.y - gesture.y)
-    gesture.x = point.x
-    gesture.y = point.y
-    slide(gesture.piece, dx, dy, pieces)
-  }
-
-  const onUp = (event: PointerEvent) => {
-    if (!gesture || event.pointerId !== gesture.id) return
-    const piece = gesture.piece
+  const release = (piece: StagePiece) => {
     gesture = null
     held = null
-    const { x, y } = piece.mesh.position
+    resetContact(contact)
+    piece.mesh.position.x = 0
+    piece.mesh.position.y = 0
+    const { x, y } = piece.anchor.position
     if (!centerInGrid(x, y)) {
       piece.alive = false
       piece.mesh.visible = false
@@ -107,10 +91,54 @@ export function mountSlideGame(
     }
   }
 
+  const onDown = (event: PointerEvent) => {
+    if (ended) return
+    if (event.button !== 0) return
+    // A second finger while the first is still held does not start a gesture.
+    // A new press after a missed pointerup takes over, so the next piece is not lost.
+    if (gesture && gesture.id !== event.pointerId && stage.hasPointerCapture(gesture.id)) return
+    if (gesture) release(gesture.piece)
+    const point = designOf(event)
+    if (!point || !inDesign(point.x, point.y)) return
+    const hit = pieceAt(point.x, point.y, pieces)
+    if (!hit) return
+    stage.setPointerCapture(event.pointerId)
+    held = hit
+    contact.originX = hit.anchor.position.x
+    contact.originY = hit.anchor.position.y
+    gesture = {
+      id: event.pointerId,
+      piece: hit,
+      filter: seedFinger(event.timeStamp, point.x, point.y),
+    }
+  }
+
+  const onMove = (event: PointerEvent) => {
+    if (!gesture || event.pointerId !== gesture.id) return
+    const point = designOf(event)
+    if (!point) return
+    const piece = gesture.piece
+    const step = filterFinger(gesture.filter, event.timeStamp, point.x, point.y)
+    noteSteps(contact, followFinger(piece, step.x, -step.y, pieces))
+  }
+
+  const onUp = (event: PointerEvent) => {
+    if (!gesture || event.pointerId !== gesture.id) return
+    const piece = gesture.piece
+    release(piece)
+    if (stage.hasPointerCapture(event.pointerId)) stage.releasePointerCapture(event.pointerId)
+  }
+
+  const onLostCapture = (event: PointerEvent) => {
+    if (!gesture || event.pointerId !== gesture.id) return
+    release(gesture.piece)
+  }
+
   stage.addEventListener('pointerdown', onDown)
   stage.addEventListener('pointermove', onMove)
   stage.addEventListener('pointerup', onUp)
   stage.addEventListener('pointercancel', onUp)
+  stage.addEventListener('lostpointercapture', onLostCapture)
 
   return {
     setLights(keyIntensity, keyAzimuth, keyElevation, fillIntensity, fillAzimuth, fillElevation, ambientIntensity): void {
@@ -126,7 +154,7 @@ export function mountSlideGame(
       return height
     },
     update(dt) {
-      const ready = held && !centerInGrid(held.mesh.position.x, held.mesh.position.y) ? [held.mesh] : []
+      const ready = held && !centerInGrid(held.anchor.position.x, held.anchor.position.y) ? [held.mesh] : []
     hint.set(ready)
     hint.step(dt)
     stepShatters(shatters, -DESIGN_HEIGHT - SHATTER.chip, dt)
@@ -140,13 +168,42 @@ export function mountSlideGame(
         if (!piece.alive) continue
         const from = lifts.get(piece) ?? 0
         const to = piece === held ? 1 : 0
-        const next = from + (to - from) * step
+        const next = to === 1 ? 1 : from + (to - from) * step
         lifts.set(piece, next)
-        piece.mesh.position.z = piece.restZ + next * piece.height * 0.5
+        piece.anchor.position.z = piece.restZ + next * piece.height * 0.5
+        const stroke = piece.outline.material
+        if (stroke instanceof THREE.MeshBasicMaterial) stroke.opacity = next
+        piece.outline.visible = next > 0.02
+      }
+      stepContact(contact, held, dt)
+    },
+    renderOverlay(renderer, camera) {
+      const active = pieces.filter((piece) => piece.alive && piece.outline.visible)
+      if (active.length === 0) return
+      for (const piece of active) {
+        piece.mesh.layers.enable(1)
+        const material = piece.mesh.material
+        if (material instanceof THREE.Material) material.colorWrite = false
+      }
+      const autoClear = renderer.autoClear
+      const background = scene.background
+      scene.background = null
+      renderer.autoClear = false
+      renderer.clearDepth()
+      camera.layers.set(1)
+      renderer.render(scene, camera)
+      camera.layers.set(0)
+      renderer.autoClear = autoClear
+      scene.background = background
+      for (const piece of active) {
+        piece.mesh.layers.disable(1)
+        const material = piece.mesh.material
+        if (material instanceof THREE.Material) material.colorWrite = true
       }
     },
     dispose() {
       stage.removeEventListener('pointerdown', onDown)
+      stage.removeEventListener('lostpointercapture', onLostCapture)
       stage.removeEventListener('pointermove', onMove)
       stage.removeEventListener('pointerup', onUp)
       stage.removeEventListener('pointercancel', onUp)
@@ -154,13 +211,12 @@ export function mountSlideGame(
   }
 }
 
-/** Move by this finger step. The larger axis goes first. If that axis cannot move, the piece stays. */
 function chipPoints(piece: StagePiece): { x: number; y: number }[] {
   const points: { x: number; y: number }[] = []
   const step = SHATTER.step
   for (const local of piece.locals) {
-    const x0 = piece.mesh.position.x + local.x - piece.half
-    const y0 = piece.mesh.position.y + local.y - piece.half
+    const x0 = piece.anchor.position.x + local.x - piece.half
+    const y0 = piece.anchor.position.y + local.y - piece.half
     const side = piece.half * 2
     const count = Math.max(1, Math.round(side / step))
     for (let col = 0; col < count; col++) {
@@ -178,67 +234,4 @@ function chipPoints(piece: StagePiece): { x: number; y: number }[] {
 function pieceColor(piece: StagePiece): number {
   const material = piece.mesh.material
   return material instanceof THREE.MeshStandardMaterial ? material.color.getHex() : 0xffffff
-}
-
-function slide(piece: StagePiece, dx: number, dy: number, pieces: readonly StagePiece[]): void {
-  if (dx === 0 && dy === 0) return
-  const others = pieces.filter((item) => item !== piece && item.alive)
-  const horizontal = Math.abs(dx) >= Math.abs(dy)
-  const primary = moveAxis(piece, horizontal ? dx : 0, horizontal ? 0 : dy, others)
-  if (Math.abs(primary) < 0.4) return
-  moveAxis(piece, horizontal ? 0 : dx, horizontal ? dy : 0, others)
-}
-
-function moveAxis(piece: StagePiece, dx: number, dy: number, others: readonly StagePiece[]): number {
-  const amount = dx !== 0 ? dx : dy
-  if (amount === 0) return 0
-  const ox = piece.mesh.position.x
-  const oy = piece.mesh.position.y
-  const overlapsAt = (t: number) =>
-    overlaps(piece, ox + dx * t, oy + dy * t, others) ||
-    hitsWall(piece.locals, piece.half, ox + dx * t, oy + dy * t)
-  if (overlapsAt(0)) return 0
-  if (!overlapsAt(1)) {
-    piece.mesh.position.x = ox + dx
-    piece.mesh.position.y = oy + dy
-    return amount
-  }
-  let lo = 0
-  let hi = 1
-  for (let i = 0; i < 14; i++) {
-    const mid = (lo + hi) / 2
-    if (overlapsAt(mid)) hi = mid
-    else lo = mid
-  }
-  piece.mesh.position.x = ox + dx * lo
-  piece.mesh.position.y = oy + dy * lo
-  return amount * lo
-}
-
-function overlaps(piece: StagePiece, x: number, y: number, others: readonly StagePiece[]): boolean {
-  for (const other of others) {
-    for (const a of piece.locals) {
-      for (const b of other.locals) {
-        const cx = x + a.x - (other.mesh.position.x + b.x)
-        const cy = y + a.y - (other.mesh.position.y + b.y)
-        if (Math.abs(cx) < piece.half + other.half && Math.abs(cy) < piece.half + other.half) return true
-      }
-    }
-  }
-  return false
-}
-
-function pieceAt(x: number, y: number, pieces: readonly StagePiece[]): StagePiece | null {
-  const wx = x
-  const wy = -y
-  for (let i = pieces.length - 1; i >= 0; i--) {
-    const piece = pieces[i]
-    if (!piece.alive) continue
-    for (const local of piece.locals) {
-      const cx = piece.mesh.position.x + local.x
-      const cy = piece.mesh.position.y + local.y
-      if (Math.abs(wx - cx) <= piece.half && Math.abs(wy - cy) <= piece.half) return piece
-    }
-  }
-  return null
 }

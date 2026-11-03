@@ -18,7 +18,6 @@ import {
   SHADOW_OPACITY,
   SHADOW_Z,
   SKY,
-  TRAY_BEVEL,
   TRAY_BEVEL_SIZE,
   TRAY_LIP,
   TRAY_MARGIN,
@@ -26,12 +25,18 @@ import {
 } from './look'
 
 const GAP = 4
+/** How far the silhouette shell sits outside the piece, in design pixels. */
+const OUTLINE = 4
 const BOARD = BOARD_GRID * CELL
 const ORIGIN_X = (DESIGN_WIDTH - BOARD) / 2
 const ORIGIN_Y = (DESIGN_HEIGHT - BOARD) / 2
 
 export type StagePiece = {
+  /** Logical pose. Collision and release read this, never the bump. */
+  anchor: THREE.Group
   mesh: THREE.Mesh
+  /** Silhouette shell. Opacity follows the lift. */
+  outline: THREE.Mesh
   cells: readonly (readonly [number, number])[]
   /** Cell centers relative to the mesh origin. */
   locals: { x: number; y: number }[]
@@ -59,23 +64,6 @@ export type StageRig = {
 /** Piece center is inside the 5×5 cell area. World x right, world y up. */
 export function centerInGrid(x: number, y: number): boolean {
   return x >= ORIGIN_X && x <= ORIGIN_X + BOARD && y <= -ORIGIN_Y && y >= -(ORIGIN_Y + BOARD)
-}
-
-/** Left, right, and bottom walls. The top stays open. */
-export function hitsWall(locals: readonly { x: number; y: number }[], half: number, x: number, y: number): boolean {
-  const size = half * 2
-  const opening = BOARD - (CELL - size) + TRAY_MARGIN * 2
-  const cx = ORIGIN_X + BOARD / 2
-  const cy = -(ORIGIN_Y + BOARD / 2)
-  const left = cx - opening / 2
-  const right = cx + opening / 2
-  const bottom = cy - opening / 2
-  for (const local of locals) {
-    if (x + local.x - half < left) return true
-    if (x + local.x + half > right) return true
-    if (y + local.y - half < bottom) return true
-  }
-  return false
 }
 
 export function mountStage(scene: THREE.Scene): StageRig {
@@ -143,19 +131,44 @@ export function mountStage(scene: THREE.Scene): StageRig {
   floor.castShadow = true
   floor.receiveShadow = true
   floor.position.set(ORIGIN_X + BOARD / 2, -(ORIGIN_Y + BOARD / 2), floorZ())
-  const wall = new THREE.Mesh(new THREE.BufferGeometry(), boardMat)
-  wall.castShadow = true
-  wall.receiveShadow = true
-  wall.position.set(ORIGIN_X + BOARD / 2, -(ORIGIN_Y + BOARD / 2), FLOOR_TOP + TRAY_BEVEL)
-  scene.add(floor, wall, makeGrid())
+  scene.add(floor, makeGrid())
 
   const pieces: StagePiece[] = LEVEL.map((piece, index) => {
     const mesh = new THREE.Mesh(new THREE.BufferGeometry(), pieceMats[index])
     mesh.castShadow = true
     mesh.receiveShadow = true
-    mesh.position.z = FLOOR_TOP
-    scene.add(mesh)
-    return { mesh, cells: piece.cells, locals: [], half: 0, height: 0, restZ: FLOOR_TOP, alive: true }
+    const anchor = new THREE.Group()
+    anchor.position.z = FLOOR_TOP
+    anchor.add(mesh)
+    const outline = new THREE.Mesh(
+      new THREE.BufferGeometry(),
+      new THREE.MeshBasicMaterial({
+        color: brighter(pieceMats[index].color),
+        side: THREE.BackSide,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        toneMapped: false,
+      }),
+    )
+    outline.visible = false
+    outline.castShadow = false
+    outline.receiveShadow = false
+    outline.layers.set(1)
+    outline.renderOrder = 2
+    mesh.add(outline)
+    scene.add(anchor)
+    return {
+      anchor,
+      mesh,
+      outline,
+      cells: piece.cells,
+      locals: [],
+      half: 0,
+      height: 0,
+      restZ: FLOOR_TOP,
+      alive: true,
+    }
   })
 
   const placeCube = (size: number, corner: number, edge: number) => {
@@ -165,9 +178,11 @@ export function mountStage(scene: THREE.Scene): StageRig {
       const first = piece.half === 0
       piece.mesh.geometry.dispose()
       piece.mesh.geometry = next.geometry
+      piece.outline.geometry.dispose()
+      piece.outline.geometry = silhouetteSleeve(next.outline, bevel + OUTLINE, size)
       if (first) {
-        piece.mesh.position.x = next.x
-        piece.mesh.position.y = next.y
+        piece.anchor.position.x = next.x
+        piece.anchor.position.y = next.y
       }
       piece.locals = piece.cells.map(([col, row]) => ({
         x: ORIGIN_X + (col + 0.5) * CELL - next.x,
@@ -178,8 +193,6 @@ export function mountStage(scene: THREE.Scene): StageRig {
     }
     floor.geometry.dispose()
     floor.geometry = floorGeometry(size, corner, edge)
-    wall.geometry.dispose()
-    wall.geometry = wallGeometry(size, corner, edge)
   }
   placeCube(look.size, look.corner, look.edge)
 
@@ -305,50 +318,12 @@ function floorGeometry(size: number, corner: number, edge: number): THREE.Extrud
   })
 }
 
-function wallGeometry(size: number, corner: number, edge: number): THREE.ExtrudeGeometry {
-  const span = traySpans(size, corner, edge)
-  const o = span.outer / 2
-  const lip = TRAY_LIP
-  const inner = o - lip
-  // Bottom corners share the floor's center. The open ends stay a flat head:
-  // each corner radius stays below half the lip, so the two arcs cannot meet as a semicircle.
-  const outerRadius = Math.min(span.outerRadius, o - lip - 1)
-  const innerRadius = Math.max(0.5, outerRadius - lip)
-  const cap = Math.min(Math.max(0.5, corner), lip / 2 - 2)
-  const shape = new THREE.Shape()
-  shape.moveTo(-inner, o - cap)
-  shape.absarc(-inner - cap, o - cap, cap, 0, Math.PI / 2, false)
-  shape.lineTo(-o + cap, o)
-  shape.absarc(-o + cap, o - cap, cap, Math.PI / 2, Math.PI, false)
-  shape.lineTo(-o, -o + outerRadius)
-  shape.absarc(-o + outerRadius, -o + outerRadius, outerRadius, Math.PI, Math.PI * 1.5, false)
-  shape.lineTo(o - outerRadius, -o)
-  shape.absarc(o - outerRadius, -o + outerRadius, outerRadius, Math.PI * 1.5, Math.PI * 2, false)
-  shape.lineTo(o, o - cap)
-  shape.absarc(o - cap, o - cap, cap, 0, Math.PI / 2, false)
-  shape.lineTo(inner + cap, o)
-  shape.absarc(inner + cap, o - cap, cap, Math.PI / 2, Math.PI, false)
-  shape.lineTo(inner, -inner + innerRadius)
-  shape.absarc(inner - innerRadius, -inner + innerRadius, innerRadius, 0, -Math.PI / 2, true)
-  shape.lineTo(-inner + innerRadius, -inner)
-  shape.absarc(-inner + innerRadius, -inner + innerRadius, innerRadius, -Math.PI / 2, Math.PI, true)
-  shape.closePath()
-  return new THREE.ExtrudeGeometry(shape, {
-    depth: Math.max(1, size - TRAY_BEVEL),
-    bevelEnabled: true,
-    bevelThickness: TRAY_BEVEL,
-    bevelSize: TRAY_BEVEL_SIZE,
-    bevelSegments: 4,
-    curveSegments: 12,
-  })
-}
-
 function pieceGeometry(
   cells: readonly (readonly [number, number])[],
   size: number,
   corner: number,
   bevel: number,
-): { geometry: THREE.BufferGeometry; x: number; y: number } {
+): { geometry: THREE.BufferGeometry; outline: [number, number][]; x: number; y: number } {
   const home = new THREE.Vector2()
   for (const [col, row] of cells) {
     home.x += ORIGIN_X + (col + 0.5) * CELL
@@ -371,7 +346,80 @@ function pieceGeometry(
     curveSegments: 1,
   })
   geometry.translate(0, 0, bevel)
-  return { geometry, x: home.x, y: home.y }
+  return { geometry, outline, x: home.x, y: home.y }
+}
+
+/** Same hue, lifted so the stroke reads lighter than the piece. */
+function brighter(color: THREE.Color): THREE.Color {
+  const next = color.clone()
+  const hsl = { h: 0, s: 0, l: 0 }
+  next.getHSL(hsl)
+  next.setHSL(hsl.h, hsl.s, Math.min(0.92, hsl.l + 0.34))
+  return next
+}
+
+/** Smooth prism just outside the piece. Its back faces are the stroke, without the bevel's jagged normals. */
+function silhouetteSleeve(
+  points: [number, number][],
+  dist: number,
+  height: number,
+): THREE.ExtrudeGeometry {
+  const shape = new THREE.Shape()
+  offsetClosed(points, dist).forEach(([x, y], i) => (i === 0 ? shape.moveTo(x, y) : shape.lineTo(x, y)))
+  shape.closePath()
+  return new THREE.ExtrudeGeometry(shape, {
+    depth: height,
+    bevelEnabled: false,
+    curveSegments: 1,
+  })
+}
+
+/** Positive distance moves each edge outward. */
+function offsetClosed(points: [number, number][], dist: number): [number, number][] {
+  const src: [number, number][] = []
+  for (const point of points) {
+    const prev = src[src.length - 1]
+    if (prev && Math.hypot(point[0] - prev[0], point[1] - prev[1]) < 0.05) continue
+    src.push(point)
+  }
+  if (src.length > 2) {
+    const first = src[0]
+    const last = src[src.length - 1]
+    if (Math.hypot(first[0] - last[0], first[1] - last[1]) < 0.05) src.pop()
+  }
+  let area = 0
+  for (let i = 0; i < src.length; i++) {
+    const a = src[i]
+    const b = src[(i + 1) % src.length]
+    area += a[0] * b[1] - b[0] * a[1]
+  }
+  const wind = area >= 0 ? 1 : -1
+  const edges = src.map((point, i) => {
+    const next = src[(i + 1) % src.length]
+    const dx = next[0] - point[0]
+    const dy = next[1] - point[1]
+    const len = Math.hypot(dx, dy) || 1
+    return { x: point[0] + (dy / len) * dist * wind, y: point[1] - (dx / len) * dist * wind, dx, dy }
+  })
+  const out: [number, number][] = []
+  for (let i = 0; i < edges.length; i++) {
+    const a = edges[i]
+    const b = edges[(i + 1) % edges.length]
+    const cross = a.dx * b.dy - a.dy * b.dx
+    let x = b.x
+    let y = b.y
+    if (Math.abs(cross) > 1e-6) {
+      const t = ((b.x - a.x) * b.dy - (b.y - a.y) * b.dx) / cross
+      x = a.x + a.dx * t
+      y = a.y + a.dy * t
+    }
+    if (Math.hypot(x - b.x, y - b.y) > Math.abs(dist) * 3) {
+      x = b.x
+      y = b.y
+    }
+    out.push([x, y])
+  }
+  return out
 }
 
 /** Outer silhouette in local world XY. Convex corners are rounded; concave corners stay sharp. */

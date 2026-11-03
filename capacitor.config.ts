@@ -6,8 +6,8 @@ import type { CapacitorConfig } from '@capacitor/cli';
  * - base './' on Vite → relative assets for offline WebView
  */
 const config: CapacitorConfig = {
-  appId: 'com.wangzhixuan.pwgbase.hapticstest',
-  appName: 'PWG Haptic Test',
+  appId: 'com.wangzhixuan.slideice',
+  appName: 'SlideIce',
   webDir: 'dist',
   server: {
     androidScheme: 'https',
