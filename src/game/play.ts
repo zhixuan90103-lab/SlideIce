@@ -13,7 +13,6 @@ import { DESIGN_HEIGHT, DESIGN_WIDTH, type StageLayout } from '../adapt/design'
 import {
   DIR_STEP,
   GRID,
-  PIECES,
   WALL,
   type Dir,
   type PieceDef,
@@ -57,6 +56,17 @@ export type WoodGame = {
   dispose(): void
   /** Extruded height in design pixels. Bottom stays at z = 2. Returns the top z. */
   setPieceHeight(height: number): number
+  setRoughness(roughness: number): void
+  setLights(
+    keyIntensity: number,
+    keyAzimuth: number,
+    keyElevation: number,
+    fillIntensity: number,
+    fillAzimuth: number,
+    fillElevation: number,
+    ambient: number,
+  ): void
+  setCube(size: number, corner: number, edge: number): void
 }
 
 export function mountWoodGame(
@@ -67,30 +77,96 @@ export function mountWoodGame(
   assertLevel1()
   assertFrame()
 
-  scene.add(new THREE.HemisphereLight(0xfff6e4, 0x4a2e18, 0.72))
-  const key = new THREE.DirectionalLight(0xfff8ee, 2.6)
-  key.position.set(-220, 340, 280)
-  scene.add(key)
-  const fill = new THREE.DirectionalLight(0xffe0b0, 0.35)
-  fill.position.set(160, -80, 140)
-  scene.add(fill)
+  const ambient = new THREE.AmbientLight(0xfff8f2, 0)
+  const hemi = new THREE.HemisphereLight(0xfff8f2, 0xf3d7be, 1.55)
+  const key = new THREE.DirectionalLight(0xffffff, 0.85)
+  const fill = new THREE.DirectionalLight(0xffe4cc, 0.28)
+  const rim = new THREE.DirectionalLight(0xffe4cc, 0)
+  key.castShadow = true
+  key.shadow.mapSize.set(2048, 2048)
+  key.shadow.bias = -0.0008
+  key.shadow.normalBias = 0.04
+  key.shadow.radius = 6
+  key.shadow.intensity = 1
+  if ('blurSamples' in key.shadow) key.shadow.blurSamples = 16
+  key.shadow.camera.near = 100
+  key.shadow.camera.far = 2000
+  key.shadow.camera.left = -280
+  key.shadow.camera.right = 280
+  key.shadow.camera.top = 280
+  key.shadow.camera.bottom = -280
+  scene.add(ambient, hemi, key, fill, rim)
+  scene.add(key.target)
+  const lightAim = new THREE.Vector3(DESIGN_WIDTH / 2, -DESIGN_HEIGHT / 2, 0)
+  key.target.position.copy(lightAim)
+  const placeLight = (light: THREE.DirectionalLight, azimuth: number, elevation: number) => {
+    const az = THREE.MathUtils.degToRad(azimuth)
+    const el = THREE.MathUtils.degToRad(elevation)
+    const flat = Math.cos(el) * 900
+    light.position.set(
+      lightAim.x + Math.sin(az) * flat,
+      lightAim.y + Math.cos(az) * flat,
+      lightAim.z + Math.sin(el) * 900,
+    )
+  }
+  placeLight(key, -30, 80)
+  placeLight(fill, -101, 57)
+  placeLight(rim, 149, 42)
 
-  scene.background = new THREE.Color(0x6a3b22)
-  const trayMat = woodMaterial(0x9a6236, 1.6)
-  const floorMat = woodMaterial(0x6a4128, 1.8)
+  scene.background = softSky()
+  const shadowPlane = new THREE.Mesh(
+    new THREE.PlaneGeometry(DESIGN_WIDTH, DESIGN_HEIGHT),
+    new THREE.ShadowMaterial({ opacity: 0.4 }),
+  )
+  shadowPlane.receiveShadow = true
+  shadowPlane.position.set(DESIGN_WIDTH / 2, -DESIGN_HEIGHT / 2, -40)
+  scene.add(shadowPlane)
 
-  scene.add(makeBackdrop())
-  scene.add(makeTray(trayMat))
-  scene.add(makeFloor(floorMat))
-  scene.add(makeWall(trayMat))
+  const boardMat = new THREE.MeshStandardMaterial({
+    color: 0xfaf7f3,
+    roughness: 0.62,
+    metalness: 0,
+  })
+  boardMat.shadowSide = THREE.BackSide
+  const floorTop = -7
+  const tray = makeTray(boardMat, 60)
+  const floor = makeFloor(boardMat)
+  scene.add(tray)
+  scene.add(floor)
+  scene.add(makeGrid())
+  const cubeMat = plastic(0xf27b4e)
+  let cubeGeometry: THREE.BufferGeometry = new THREE.BufferGeometry()
+  const cubes: THREE.Mesh[] = []
+  for (let row = 0; row < GRID; row++) {
+    for (let col = 0; col < GRID; col++) {
+      const cube = new THREE.Mesh(cubeGeometry, cubeMat)
+      cube.castShadow = true
+      cube.receiveShadow = true
+      cube.position.set(
+        ORIGIN_X + (col + 0.5) * CELL,
+        -(ORIGIN_Y + (row + 0.5) * CELL),
+        floorTop,
+      )
+      scene.add(cube)
+      cubes.push(cube)
+    }
+  }
+  const placeCube = (size: number, corner: number, edge: number) => {
+    const bevel = Math.min(Math.max(1, edge), size / 2 - 1.5)
+    const next = evenCubeGeometry(size, corner, bevel)
+    cubeGeometry.dispose()
+    cubeGeometry = next
+    for (const cube of cubes) cube.geometry = cubeGeometry
+    tray.geometry.dispose()
+    tray.geometry = trayGeometry(size, corner, edge)
+    tray.position.z = floorTop + TRAY_BEVEL
+    floor.geometry.dispose()
+    floor.geometry = floorGeometry(size, corner, edge)
+  }
+  placeCube(BODY, 5, 8)
 
   const occ = startingOccupancy()
   const views = new Map<string, View>()
-  for (const def of PIECES) {
-    const view = makePiece(def)
-    views.set(def.id, view)
-    scene.add(view.group)
-  }
 
   let gesture: Gesture | null = null
   let ended = false
@@ -163,6 +239,22 @@ export function mountWoodGame(
   stage.addEventListener('pointercancel', onUp)
 
   return {
+    setLights(keyIntensity, keyAzimuth, keyElevation, fillIntensity, fillAzimuth, fillElevation, ambientIntensity): void {
+      ambient.intensity = 0
+      hemi.intensity = ambientIntensity
+      key.intensity = keyIntensity
+      fill.intensity = fillIntensity
+      rim.intensity = 0
+      placeLight(key, keyAzimuth, keyElevation)
+      placeLight(fill, fillAzimuth, fillElevation)
+    },
+    setCube(size: number, corner: number, edge: number): void {
+      placeCube(Math.max(20, size), Math.max(2, corner), Math.max(1, edge))
+    },
+    setRoughness(roughness: number): void {
+      const value = Math.min(1, Math.max(0, roughness))
+      for (const material of woodMaterials) material.roughness = value
+    },
     setPieceHeight(height: number): number {
       const h = Math.max(1, height)
       for (const view of views.values()) {
@@ -273,21 +365,22 @@ function cellWorld(col: number, row: number): THREE.Vector3 {
 }
 
 const PIECE_TINT: Record<string, number> = {
-  C: 0x2f9ed8,
-  H: 0xf0b02a,
-  A: 0xf6c843,
-  P: 0x3cb44a,
-  B: 0x8a48c4,
-  M: 0xf08a28,
+  C: 0x3aa8ff,
+  H: 0xff8a2a,
+  A: 0xf2c14e,
+  P: 0x3dcc73,
+  B: 0xa86bff,
+  M: 0xff564c,
 }
 
-const MESH_H = 14
-const TOP_Z = 16
-const CORNER_R = 10
-const BEVEL_Z = 5
-const BEVEL_XY = 3.2
+/** Unscaled mesh height. Built at play size so the bevel is not stretched into a straight wall. */
+const MESH_H = 40
+const TOP_Z = MESH_H + 2
+const CORNER_R = 16
+const BEVEL_Z = 10
+const BEVEL_XY = 7
 
-function makePiece(def: PieceDef): View {
+export function makePiece(def: PieceDef): View {
   const centers = def.cells.map(([col, row]) => cellWorld(col, row))
   const home = centers
     .reduce((sum, center) => sum.add(center), new THREE.Vector3())
@@ -306,9 +399,11 @@ function makePiece(def: PieceDef): View {
       bevelSegments: 8,
       bevelOffset: 0,
     }),
-    woodMaterial(PIECE_TINT[def.id] ?? 0xe0b56a, 2.2),
+    plastic(PIECE_TINT[def.id] ?? 0xff8a2a),
   )
   mesh.position.z = TOP_Z - MESH_H
+  mesh.castShadow = true
+  mesh.receiveShadow = true
   visual.add(mesh)
   const shadowShape = pieceShape(def.cells, home)
   const shadow = new THREE.Mesh(
@@ -316,11 +411,11 @@ function makePiece(def: PieceDef): View {
     new THREE.MeshBasicMaterial({
       color: 0x2a140c,
       transparent: true,
-      opacity: 0.28,
+      opacity: 0.34,
       depthWrite: false,
     }),
   )
-  shadow.position.set(1.5, -6, 0.3)
+  shadow.position.set(2, -2.5, 0.6)
   visual.add(shadow)
   return { def, group, visual, home }
 }
@@ -417,13 +512,147 @@ function filletConvex(points: [number, number][], radius: number): [number, numb
   return out
 }
 
-function woodMaterial(tint: number, repeat: number): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({
+function snapRounded(x: number, y: number, half: number, radius: number): [number, number] {
+  const r = Math.min(Math.max(radius, 0), half - 0.001)
+  const lim = half - r
+  const sx = Math.sign(x) || 1
+  const sy = Math.sign(y) || 1
+  let ax = Math.min(Math.abs(x), half)
+  let ay = Math.min(Math.abs(y), half)
+  if (ax > lim && ay > lim) {
+    const dx = ax - lim
+    const dy = ay - lim
+    const len = Math.hypot(dx, dy)
+    if (len > r) {
+      ax = lim + (dx / len) * r
+      ay = lim + (dy / len) * r
+    }
+  }
+  return [sx * ax, sy * ay]
+}
+
+/** Top is an even grid. The bevel rings share that grid's outer loop, so the cap is not one flat fan. */
+function evenCubeGeometry(size: number, corner: number, bevel: number): THREE.BufferGeometry {
+  const div = 12
+  const bevelSeg = 24
+  const halfIn = size / 2 - bevel
+  const radIn = Math.min(halfIn - 0.25, Math.max(0.5, corner - bevel))
+  const halfOut = size / 2
+  const radOut = Math.min(halfOut - 0.25, radIn + bevel)
+  const positions: number[] = []
+  const indices: number[] = []
+  const add = (x: number, y: number, z: number) => {
+    positions.push(x, y, z)
+    return positions.length / 3 - 1
+  }
+  const grid = (half: number, rad: number) => {
+    const rows: [number, number][][] = []
+    for (let j = 0; j <= div; j++) {
+      const y = -half + (2 * half * j) / div
+      const row: [number, number][] = []
+      for (let i = 0; i <= div; i++) {
+        const x = -half + (2 * half * i) / div
+        row.push(snapRounded(x, y, half, rad))
+      }
+      rows.push(row)
+    }
+    return rows
+  }
+  const top = grid(halfIn, radIn)
+  const topId = top.map((row) => row.map(([x, y]) => add(x, y, size)))
+  for (let j = 0; j < div; j++) {
+    for (let i = 0; i < div; i++) {
+      const a = topId[j][i]
+      const b = topId[j][i + 1]
+      const c = topId[j + 1][i + 1]
+      const d = topId[j + 1][i]
+      indices.push(a, b, c, a, c, d)
+    }
+  }
+  const ringOf = (half: number, rad: number, z: number) => {
+    const g = grid(half, rad)
+    const ids: number[] = []
+    for (let i = 0; i < div; i++) ids.push(add(g[0][i][0], g[0][i][1], z))
+    for (let j = 0; j < div; j++) ids.push(add(g[j][div][0], g[j][div][1], z))
+    for (let i = div; i > 0; i--) ids.push(add(g[div][i][0], g[div][i][1], z))
+    for (let j = div; j > 0; j--) ids.push(add(g[j][0][0], g[j][0][1], z))
+    return ids
+  }
+  const topRing: number[] = []
+  for (let i = 0; i < div; i++) topRing.push(topId[0][i])
+  for (let j = 0; j < div; j++) topRing.push(topId[j][div])
+  for (let i = div; i > 0; i--) topRing.push(topId[div][i])
+  for (let j = div; j > 0; j--) topRing.push(topId[j][0])
+  const bridge = (upper: number[], lower: number[]) => {
+    for (let i = 0; i < upper.length; i++) {
+      const i1 = (i + 1) % upper.length
+      indices.push(upper[i], lower[i], lower[i1], upper[i], lower[i1], upper[i1])
+    }
+  }
+  const bottom = grid(halfOut, radOut)
+  const bottomId = bottom.map((row) => row.map(([x, y]) => add(x, y, 0)))
+  for (let j = 0; j < div; j++) {
+    for (let i = 0; i < div; i++) {
+      const a = bottomId[j][i]
+      const b = bottomId[j][i + 1]
+      const c = bottomId[j + 1][i + 1]
+      const d = bottomId[j + 1][i]
+      indices.push(a, c, b, a, d, c)
+    }
+  }
+  const bottomRing: number[] = []
+  for (let i = 0; i < div; i++) bottomRing.push(bottomId[0][i])
+  for (let j = 0; j < div; j++) bottomRing.push(bottomId[j][div])
+  for (let i = div; i > 0; i--) bottomRing.push(bottomId[div][i])
+  for (let j = div; j > 0; j--) bottomRing.push(bottomId[j][0])
+
+  let prev = topRing
+  for (let s = 1; s <= bevelSeg; s++) {
+    const t = s / bevelSeg
+    const k = Math.sin((t * Math.PI) / 2)
+    const ring = ringOf(
+      halfIn + (halfOut - halfIn) * k,
+      radIn + (radOut - radIn) * k,
+      size - bevel * (1 - Math.cos((t * Math.PI) / 2)),
+    )
+    bridge(prev, ring)
+    prev = ring
+  }
+  bridge(prev, bottomRing)
+
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+  geometry.setIndex(indices)
+  geometry.computeVertexNormals()
+  return geometry
+}
+
+const woodMaterials: THREE.MeshStandardMaterial[] = []
+
+/** Candy plastic, same roughness and metal as Ring. */
+function plastic(tint: number): THREE.MeshStandardMaterial {
+  const material = new THREE.MeshStandardMaterial({
+    color: tint,
+    roughness: 0.42,
+    metalness: 0.02,
+    envMapIntensity: 0,
+  })
+  material.shadowSide = THREE.BackSide
+  woodMaterials.push(material)
+  return material
+}
+
+export function woodMaterial(tint: number, repeat: number): THREE.MeshStandardMaterial {
+  const material = new THREE.MeshStandardMaterial({
     color: tint,
     map: woodMap(repeat),
-    roughness: 0.58,
-    metalness: 0,
+    roughness: 0.42,
+    metalness: 0.02,
+    envMapIntensity: 0,
   })
+  material.shadowSide = THREE.BackSide
+  woodMaterials.push(material)
+  return material
 }
 
 function woodMap(repeat: number): THREE.CanvasTexture {
@@ -432,11 +661,11 @@ function woodMap(repeat: number): THREE.CanvasTexture {
   canvas.height = 256
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('no 2d context')
-  ctx.fillStyle = '#f3d7a4'
+  ctx.fillStyle = '#f4d7a8'
   ctx.fillRect(0, 0, 128, 256)
   for (let i = 0; i < 22; i++) {
     const x = (i * 6) % 128
-    ctx.strokeStyle = `rgba(74, 40, 14, ${0.12 + (i % 4) * 0.05})`
+    ctx.strokeStyle = `rgba(120, 64, 24, ${0.08 + (i % 4) * 0.03})`
     ctx.lineWidth = i % 3 === 0 ? 2.4 : 1.1
     ctx.beginPath()
     ctx.moveTo(x, 0)
@@ -451,15 +680,6 @@ function woodMap(repeat: number): THREE.CanvasTexture {
   return map
 }
 
-function makeBackdrop(): THREE.Mesh {
-  const mesh = new THREE.Mesh(
-    new THREE.PlaneGeometry(DESIGN_WIDTH, DESIGN_HEIGHT),
-    woodMaterial(0x7a4524, 2.2),
-  )
-  mesh.position.set(DESIGN_WIDTH / 2, -DESIGN_HEIGHT / 2, -40)
-  return mesh
-}
-
 function roundLoop(path: THREE.Path | THREE.Shape, x: number, y: number, w: number, h: number, r: number): void {
   path.moveTo(x + r, y)
   path.lineTo(x + w - r, y)
@@ -472,42 +692,156 @@ function roundLoop(path: THREE.Path | THREE.Shape, x: number, y: number, w: numb
   path.absarc(x + r, y + r, r, Math.PI, Math.PI * 1.5, false)
 }
 
-function makeTray(material: THREE.Material): THREE.Mesh {
-  const lip = 28
-  const outer = BOARD + lip * 2
+const TRAY_BEVEL = 6
+const TRAY_BEVEL_SIZE = 5
+const TRAY_LIP = 12
+const TRAY_MARGIN = 4
+
+/** The bevel pulls the inner wall inward, so the hole path is larger than the opening. */
+function traySpans(size: number, corner: number, edge: number) {
+  const opening = BOARD - (CELL - size) + TRAY_MARGIN * 2
+  const hole = opening + TRAY_BEVEL_SIZE * 2
+  const outer = hole + TRAY_LIP * 2
+  const holeRadius = Math.max(corner, edge) + TRAY_MARGIN + TRAY_BEVEL_SIZE
+  return {
+    opening,
+    hole,
+    outer,
+    holeRadius,
+    outerRadius: holeRadius + TRAY_LIP,
+    floorSpan: outer - TRAY_BEVEL_SIZE * 2,
+    floorRadius: Math.max(corner, edge) + TRAY_MARGIN + TRAY_LIP,
+  }
+}
+
+function trayGeometry(size: number, corner: number, edge: number): THREE.ExtrudeGeometry {
+  const span = traySpans(size, corner, edge)
   const frame = new THREE.Shape()
-  roundLoop(frame, -outer / 2, -outer / 2, outer, outer, 26)
+  roundLoop(frame, -span.outer / 2, -span.outer / 2, span.outer, span.outer, span.outerRadius)
   const hole = new THREE.Path()
-  roundLoop(hole, -BOARD / 2, -BOARD / 2, BOARD, BOARD, 18)
+  roundLoop(hole, -span.hole / 2, -span.hole / 2, span.hole, span.hole, span.holeRadius)
   frame.holes.push(hole)
-  const mesh = new THREE.Mesh(
-    new THREE.ExtrudeGeometry(frame, {
-      depth: 8,
-      bevelEnabled: true,
-      bevelThickness: 2.2,
-      bevelSize: 2.2,
-      bevelSegments: 4,
-    }),
-    material,
-  )
+  const depth = Math.max(1, size - TRAY_BEVEL)
+  return new THREE.ExtrudeGeometry(frame, {
+    depth,
+    bevelEnabled: true,
+    bevelThickness: TRAY_BEVEL,
+    bevelSize: TRAY_BEVEL_SIZE,
+    bevelSegments: 8,
+  })
+}
+
+export function makeTray(material: THREE.Material, height = 60): THREE.Mesh {
+  const mesh = new THREE.Mesh(trayGeometry(height, 5, 8), material)
+  mesh.castShadow = true
+  mesh.receiveShadow = true
   const cx = ORIGIN_X + BOARD / 2
   const cy = -(ORIGIN_Y + BOARD / 2)
-  mesh.position.set(cx, cy, -12)
+  mesh.position.set(cx, cy, -7)
   return mesh
 }
 
-function makeFloor(material: THREE.Material): THREE.Mesh {
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(BOARD, BOARD, 4), material)
-  mesh.position.set(ORIGIN_X + BOARD / 2, -(ORIGIN_Y + BOARD / 2), -8)
+const FLOOR_BEVEL = 6
+const FLOOR_THICK = 24
+
+function floorGeometry(size: number, corner: number, edge: number): THREE.ExtrudeGeometry {
+  const span = traySpans(size, corner, edge)
+  const shape = new THREE.Shape()
+  roundLoop(shape, -span.floorSpan / 2, -span.floorSpan / 2, span.floorSpan, span.floorSpan, span.floorRadius)
+  const depth = FLOOR_THICK - FLOOR_BEVEL * 2
+  return new THREE.ExtrudeGeometry(shape, {
+      depth,
+      bevelEnabled: true,
+      bevelThickness: FLOOR_BEVEL,
+      bevelSize: 2,
+      bevelSegments: 6,
+    })
+}
+
+export function makeFloor(material: THREE.Material): THREE.Mesh {
+  const depth = FLOOR_THICK - FLOOR_BEVEL * 2
+  const mesh = new THREE.Mesh(floorGeometry(60, 5, 8), material)
+  mesh.position.set(ORIGIN_X + BOARD / 2, -(ORIGIN_Y + BOARD / 2), -7 - depth - FLOOR_BEVEL)
+  mesh.castShadow = false
+  mesh.receiveShadow = true
   return mesh
 }
 
-function makeWall(material: THREE.Material): THREE.Group {
-  const group = new THREE.Group()
+function gridTexture(): THREE.CanvasTexture {
+  const size = 640
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')!
+  ctx.fillStyle = '#faf7f3'
+  ctx.fillRect(0, 0, size, size)
+  const cell = size / GRID
+  const gap = (GAP / CELL) * cell
+  const radius = gap * 1.6
+  ctx.fillStyle = '#f3efe9'
   for (let row = 0; row < GRID; row++) {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(BODY, BODY, 12), material)
+    for (let col = 0; col < GRID; col++) {
+      const x = col * cell + gap / 2
+      const y = row * cell + gap / 2
+      const w = cell - gap
+      ctx.beginPath()
+      ctx.roundRect(x, y, w, w, radius)
+      ctx.fill()
+    }
+  }
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  texture.anisotropy = 8
+  return texture
+}
+
+function makeGrid(): THREE.Mesh {
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(BOARD, BOARD),
+    new THREE.MeshStandardMaterial({
+      map: gridTexture(),
+      roughness: 0.62,
+      metalness: 0,
+    }),
+  )
+  mesh.position.set(ORIGIN_X + BOARD / 2, -(ORIGIN_Y + BOARD / 2), -6.85)
+  mesh.receiveShadow = true
+  return mesh
+}
+
+function softSky(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas')
+  canvas.width = 2
+  canvas.height = 256
+  const ctx = canvas.getContext('2d')!
+  const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height)
+  gradient.addColorStop(0, '#4aa8ee')
+  gradient.addColorStop(0.55, '#79c6f8')
+  gradient.addColorStop(1, '#9ed8fb')
+  ctx.fillStyle = gradient
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  return texture
+}
+
+export function makeWall(material: THREE.Material): THREE.Group {
+  const group = new THREE.Group()
+  const shape = new THREE.Shape()
+  roundLoop(shape, -BODY / 2, -BODY / 2, BODY, BODY, 14)
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: 8,
+    bevelEnabled: true,
+    bevelThickness: 5,
+    bevelSize: 5,
+    bevelSegments: 8,
+  })
+  for (let row = 0; row < GRID; row++) {
+    const mesh = new THREE.Mesh(geometry, material)
     mesh.position.copy(cellWorld(GRID - 1, row))
     mesh.position.z = -6
+    mesh.castShadow = true
+    mesh.receiveShadow = true
     group.add(mesh)
   }
   return group

@@ -4,6 +4,7 @@
  */
 
 import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { Capacitor } from '@capacitor/core';
 import { mountWoodGame, type WoodGame } from './game/play';
 import {
@@ -21,70 +22,123 @@ import {
 import { applyNativeClass, applySafeAreaCssVars } from './adapt/safeArea';
 import { createRenderer, resizeToDesign } from './create-renderer';
 
-const BASE_H = 14;
-const SIDE_PX = 4;
-const TE9 = SIDE_PX / (BASE_H * (DESIGN_HEIGHT / 2));
-
+/** Distance from the board. Farther means a milder perspective. */
 const look = {
   topZ: 42,
-  pitch: 15,
+  pitch: -15,
+  yaw: 0,
+  dist: 1200,
+  key: 0.85,
+  keyAz: -30,
+  keyEl: 80,
+  fill: 0.28,
+  fillAz: -101,
+  fillEl: 57,
+  ambient: 1.55,
+  size: 60,
+  corner: 5,
+  edge: 8,
+  roughness: 0.42,
 };
 
-/** Shear stays fixed, so a taller block shows a longer side. Pitch is extra. */
-function installSideShear(camera: THREE.OrthographicCamera): void {
-  const update = camera.updateProjectionMatrix.bind(camera);
-  const center = new THREE.Vector3(DESIGN_WIDTH / 2, -DESIGN_HEIGHT / 2, 0);
-  camera.updateProjectionMatrix = () => {
-    update();
-    center.z = look.topZ;
-    camera.updateMatrixWorld();
-    const zView = center.clone().applyMatrix4(camera.matrixWorldInverse).z;
-    const e = camera.projectionMatrix.elements;
-    e[9] = TE9;
-    e[13] -= TE9 * zView;
-    camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
-  };
-}
-
-function mountLookTune(camera: THREE.OrthographicCamera, game: WoodGame): void {
+function mountLookTune(camera: THREE.PerspectiveCamera, game: WoodGame): void {
   const root = document.getElementById('ui-root');
   if (!root) return;
+  const wrap = document.createElement('div');
+  wrap.className = 'look-settings';
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'settings-toggle';
+  toggle.textContent = '设置';
+  toggle.setAttribute('aria-expanded', 'false');
+  toggle.setAttribute('aria-controls', 'look-tune');
   const panel = document.createElement('div');
+  panel.id = 'look-tune';
   panel.className = 'look-tune';
-  panel.innerHTML =
-    '<label>块高 <output>40</output><input type="range" min="4" max="48" step="1" value="40" data-k="h" /></label>' +
-    '<label>俯仰 <output>15°</output><input type="range" min="-30" max="30" step="1" value="15" data-k="p" /></label>';
-  root.appendChild(panel);
-  const outs = panel.querySelectorAll('output');
-  const heightOut = outs[0];
-  const pitchOut = outs[1];
+  panel.hidden = true;
+  const rows: [string, string, number, number, number, number][] = [
+    ['环境', 'ambient', look.ambient, 0, 2, 0.05],
+    ['主光', 'key', look.key, 0, 6, 0.1],
+    ['主方位', 'keyAz', look.keyAz, -180, 180, 1],
+    ['主仰角', 'keyEl', look.keyEl, 5, 85, 1],
+    ['辅光', 'fill', look.fill, 0, 4, 0.1],
+    ['辅方位', 'fillAz', look.fillAz, -180, 180, 1],
+    ['辅仰角', 'fillEl', look.fillEl, 5, 85, 1],
+    ['俯仰', 'pitch', look.pitch, -70, 70, 1],
+    ['偏航', 'yaw', look.yaw, -180, 180, 1],
+    ['距离', 'dist', look.dist, 800, 2200, 20],
+    ['块', 'size', look.size, 30, 90, 1],
+    ['圆角', 'corner', look.corner, 2, 24, 1],
+    ['棱', 'edge', look.edge, 1, 20, 1],
+    ['粗糙', 'roughness', look.roughness, 0, 1, 0.01],
+  ];
+  for (const [label, key, value, min, max, step] of rows) {
+    const field = document.createElement('label');
+    const out = document.createElement('output');
+    const degrees = key === 'pitch' || key.endsWith('Az') || key.endsWith('El') || key === 'yaw';
+    out.textContent = degrees ? `${value}°` : String(value);
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = String(min);
+    input.max = String(max);
+    input.step = String(step);
+    input.value = String(value);
+    input.dataset.k = key;
+    field.append(label, out, input);
+    panel.append(field);
+  }
+  wrap.append(toggle, panel);
+  root.appendChild(wrap);
+  toggle.addEventListener('click', () => {
+    panel.hidden = !panel.hidden;
+    toggle.setAttribute('aria-expanded', panel.hidden ? 'false' : 'true');
+  });
   panel.addEventListener('input', (event) => {
     const input = event.target;
     if (!(input instanceof HTMLInputElement)) return;
     const value = Number(input.value);
-    if (input.dataset.k === 'h') {
-      look.topZ = game.setPieceHeight(value);
-      if (heightOut) heightOut.textContent = String(value);
-    } else {
-      look.pitch = value;
-      if (pitchOut) pitchOut.textContent = `${value}°`;
-    }
+    const out = input.parentElement?.querySelector('output');
+    const kind = input.dataset.k;
+    if (kind === 'ambient') look.ambient = value;
+    else if (kind === 'key') look.key = value;
+    else if (kind === 'keyAz') look.keyAz = value;
+    else if (kind === 'keyEl') look.keyEl = value;
+    else if (kind === 'fill') look.fill = value;
+    else if (kind === 'fillAz') look.fillAz = value;
+    else if (kind === 'fillEl') look.fillEl = value;
+    else if (kind === 'pitch') look.pitch = value;
+    else if (kind === 'yaw') look.yaw = value;
+    else if (kind === 'dist') look.dist = value;
+    else if (kind === 'size') look.size = value;
+    else if (kind === 'corner') look.corner = value;
+    else if (kind === 'edge') look.edge = value;
+    else if (kind === 'roughness') look.roughness = value;
+    const degrees = kind === 'pitch' || kind === 'yaw' || kind?.endsWith('Az') || kind?.endsWith('El');
+    if (out) out.textContent = degrees ? `${value}°` : String(value);
+    game.setLights(look.key, look.keyAz, look.keyEl, look.fill, look.fillAz, look.fillEl, look.ambient);
+    game.setCube(look.size, look.corner, look.edge);
+    game.setRoughness(look.roughness);
     applyCamera(camera);
   });
-  panel.addEventListener('pointerdown', (event) => event.stopPropagation());
+  wrap.addEventListener('pointerdown', (event) => event.stopPropagation());
 }
 
 const boardMid = new THREE.Vector3();
 
-function applyCamera(camera: THREE.OrthographicCamera): void {
-  camera.position.set(0, 0, 800);
-  camera.up.set(0, 1, 0);
-  camera.lookAt(0, 0, 0);
-  camera.rotateX(THREE.MathUtils.degToRad(look.pitch));
-  camera.updateProjectionMatrix();
+function applyCamera(camera: THREE.PerspectiveCamera): void {
   boardMid.set(DESIGN_WIDTH / 2, -DESIGN_HEIGHT / 2, (look.topZ + 2) / 2);
-  const ndc = boardMid.clone().applyMatrix4(camera.matrixWorldInverse).applyMatrix4(camera.projectionMatrix);
-  camera.translateY(ndc.y * (DESIGN_HEIGHT / 2));
+  const pitch = THREE.MathUtils.degToRad(look.pitch);
+  const yaw = THREE.MathUtils.degToRad(look.yaw);
+  const reach = Math.sin(pitch) * look.dist;
+  camera.fov = THREE.MathUtils.radToDeg(2 * Math.atan(DESIGN_HEIGHT / 2 / look.dist));
+  camera.aspect = DESIGN_WIDTH / DESIGN_HEIGHT;
+  camera.position.set(
+    boardMid.x + Math.sin(yaw) * reach,
+    boardMid.y + Math.cos(yaw) * reach,
+    boardMid.z + Math.cos(pitch) * look.dist,
+  );
+  camera.up.set(0, 1, 0);
+  camera.lookAt(boardMid);
   camera.updateProjectionMatrix();
 }
 
@@ -98,15 +152,18 @@ async function boot(): Promise<void> {
   const native = Capacitor.isNativePlatform();
   const renderer = await createRenderer({ container: stage });
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0b1020);
+  scene.background = new THREE.Color(0x79c6f8);
+  const pmrem = new THREE.PMREMGenerator(renderer as unknown as THREE.WebGLRenderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  scene.environmentIntensity = 0;
+  pmrem.dispose();
 
-  // Frustum is design space: x 0…390, y 0…-844. See docs/GAME.md §4.
-  // Shear drops the piece side 4px and keeps the top plane z=16 on the design grid.
-  const camera = new THREE.OrthographicCamera(0, DESIGN_WIDTH, 0, -DESIGN_HEIGHT, 0.1, 2000);
-  camera.position.set(0, 0, 800);
-  camera.lookAt(0, 0, 0);
-  installSideShear(camera);
+  // Mild perspective. The vertical view at CAMERA_DIST matches the 844 design height.
+  // Pitch lifts the camera toward world +y so the screen-down faces show. Hits stay on the design grid.
+  const camera = new THREE.PerspectiveCamera(30, DESIGN_WIDTH / DESIGN_HEIGHT, 10, 4000);
   applyCamera(camera);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
   let latestLayout: StageLayout | null = null;
   let preview: DevicePreviewController;
@@ -143,9 +200,10 @@ async function boot(): Promise<void> {
 
   game = mountWoodGame(scene, stage, () => latestLayout);
   look.topZ = game.setPieceHeight(40);
-  look.pitch = 15;
+  look.pitch = -15;
   applyCamera(camera);
   mountLookTune(camera, game);
+  game.setLights(look.key, look.keyAz, look.keyEl, look.fill, look.fillAz, look.fillEl, look.ambient);
 
   renderer.setAnimationLoop(() => {
     const now = performance.now();

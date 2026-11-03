@@ -55,7 +55,7 @@ export async function createRenderer(
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxPixelRatio));
   renderer.setSize(DESIGN_WIDTH, DESIGN_HEIGHT, false);
   renderer.toneMapping = THREE.NeutralToneMapping;
-  renderer.toneMappingExposure = 1.18;
+  renderer.toneMappingExposure = 1.1;
 
   const canvas = renderer.domElement;
   canvas.style.position = 'absolute';

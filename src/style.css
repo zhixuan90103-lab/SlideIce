@@ -5,7 +5,7 @@
   --design-w: 390;
   --design-h: 844;
   --shell-bg: #12141c;
-  --stage-bg: #0b1020;
+  --stage-bg: #79c6f8;
 
   /* Desktop sim; native overrides with env() */
   --safe-top: 59px;
@@ -103,16 +103,45 @@ body {
  * All interactive / readable UI lives here (design coords).
  * Safe padding clears Dynamic Island + home indicator.
  */
-.look-tune {
+.look-settings {
   pointer-events: auto;
-  align-self: center;
+  align-self: flex-end;
   display: flex;
-  gap: 14px;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.settings-toggle {
+  width: 52px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid rgba(243, 230, 208, 0.4);
+  border-radius: 12px;
+  background: rgba(32, 18, 10, 0.82);
+  color: #f3e6d0;
+  font: 600 13px/1 sans-serif;
+}
+
+.settings-toggle[aria-expanded='true'] {
+  background: #f3e6d0;
+  color: #2a160c;
+}
+
+.look-tune {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  max-width: 370px;
   padding: 8px 12px;
   border-radius: 12px;
   background: rgba(32, 18, 10, 0.82);
   color: #f3e6d0;
   font: 12px/1.2 sans-serif;
+}
+
+.look-tune[hidden] {
+  display: none;
 }
 
 .look-tune label {
@@ -128,7 +157,7 @@ body {
 }
 
 .look-tune input {
-  width: 110px;
+  width: 88px;
 }
 
 #ui-root {
@@ -138,7 +167,8 @@ body {
   pointer-events: none;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  justify-content: flex-start;
+  align-items: stretch;
   padding-top: calc(var(--safe-top) + var(--ui-pad-top));
   padding-right: calc(var(--safe-right) + var(--ui-pad-x));
   padding-bottom: calc(var(--safe-bottom) + var(--ui-pad-bottom));
