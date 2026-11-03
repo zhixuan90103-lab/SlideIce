@@ -4,7 +4,7 @@
  *   world y = -design y
  * Pieces on the stage follow the finger in that plane.
  * A press lifts the piece. The pressed point follows the finger.
- * Release removes the piece when most of its area is outside the board, and lands it on cells otherwise.
+ * Release removes a piece that can finish leaving, and lands every other piece on cells.
  */
 
 import * as THREE from 'three'
@@ -13,34 +13,28 @@ import { mountHint } from './hint'
 import { freshPraise, notePraiseClear, showPraise } from './praise'
 import { SHATTER, disposeShatter, makeShatter, stepShatters, type Shatter } from './shatter'
 import {
-  chooseFastAxis,
-  easeFinger,
-  FAST_MIN,
-  FAST_SPAN,
-  FAST_SPEED,
-  FAST_WINDOW,
-  followFinger,
   canLeave,
+  followHold,
   gridSnap,
   pieceAt,
+  releaseFinger,
+  rememberFinger,
   seedFinger,
-  type AxisLock,
+  seedGrab,
   type Finger,
+  type FingerSample,
+  type Grab,
 } from './slide'
 import { mountStage, type StagePiece } from './stage'
-
-type Sample = { t: number; x: number; y: number }
 
 type Gesture = {
   id: number
   piece: StagePiece
   finger: Finger
-  offsetX: number
-  offsetY: number
+  grab: Grab
   pressX: number
   pressY: number
-  samples: Sample[]
-  fast: AxisLock | null
+  samples: FingerSample[]
 }
 
 type Landing = { piece: StagePiece; x: number; y: number }
@@ -80,6 +74,10 @@ export function mountSlideGame(
   const lifts = new Map<StagePiece, number>()
   for (const piece of pieces) lifts.set(piece, 0)
 
+  const hintTargets: THREE.Object3D[] = []
+  const outlined: StagePiece[] = []
+  const maskMaterial = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: true, depthTest: true })
+  const maskRestore: THREE.Material[] = []
   let gesture: Gesture | null = null
   let landing: Landing | null = null
   let ended = false
@@ -87,20 +85,21 @@ export function mountSlideGame(
   const shatters: Shatter[] = []
   const praise = freshPraise()
   const hint = mountHint()
+  const pointer = { x: 0, y: 0 }
   const designOf = (event: PointerEvent): { x: number; y: number } | null => {
     const layout = getLayout()
     if (!layout) return null
     const rect = stage.getBoundingClientRect()
-    return {
-      x: (event.clientX - rect.left) / layout.scale,
-      y: (event.clientY - rect.top) / layout.scale,
-    }
+    pointer.x = (event.clientX - rect.left) / layout.scale
+    pointer.y = (event.clientY - rect.top) / layout.scale
+    return pointer
   }
 
   const inDesign = (x: number, y: number) =>
     x >= 0 && y >= 0 && x <= DESIGN_WIDTH && y <= DESIGN_HEIGHT
 
   const release = (piece: StagePiece) => {
+    if (gesture) releaseFinger(gesture.samples)
     gesture = null
     held = null
     piece.mesh.position.x = 0
@@ -137,46 +136,22 @@ export function mountSlideGame(
       id: event.pointerId,
       piece: hit,
       finger: seedFinger(point.x, point.y),
-      offsetX: point.x - hit.anchor.position.x,
-      offsetY: point.y + hit.anchor.position.y,
+      grab: seedGrab(point.x, point.y, hit.anchor.position.x, hit.anchor.position.y),
       pressX: point.x,
       pressY: point.y,
-      samples: [{ t: event.timeStamp / 1000, x: point.x, y: point.y }],
-      fast: null,
+      samples: [],
     }
+    rememberFinger(gesture.samples, event.timeStamp / 1000, point.x, point.y)
   }
 
   const onMove = (event: PointerEvent) => {
     if (!gesture || event.pointerId !== gesture.id) return
-    const point = designOf(event)
-    if (!point) return
-    const piece = gesture.piece
-    easeFinger(gesture.finger, point.x, point.y)
-    const now = event.timeStamp / 1000
-    gesture.samples.push({ t: now, x: gesture.finger.x, y: gesture.finger.y })
-    const windowStart = now - FAST_WINDOW
-    while (gesture.samples.length > 2 && gesture.samples[0].t < windowStart) gesture.samples.shift()
-    const first = gesture.samples[0]
-    const last = gesture.samples[gesture.samples.length - 1]
-    const span = last.t - first.t
-    const recent = Math.hypot(last.x - first.x, last.y - first.y)
-    const stroke = Math.hypot(gesture.finger.x - gesture.pressX, gesture.finger.y - gesture.pressY)
-    const fastNow = span >= FAST_SPAN && recent / span >= FAST_SPEED && stroke >= FAST_MIN
-    if (fastNow) {
-      gesture.fast = chooseFastAxis(piece, last.x - first.x, -(last.y - first.y), pieces)
-      // The ignored axis is rebased to the piece, so this sample's cross motion is not owed.
-      if (gesture.fast.axis === 'x') gesture.offsetY = piece.anchor.position.y + gesture.finger.y
-      else gesture.offsetX = gesture.finger.x - piece.anchor.position.x
-    } else {
-      gesture.fast = null
+    const readings = event.getCoalescedEvents?.() ?? [event]
+    for (const reading of readings) {
+      const point = designOf(reading)
+      if (!point) continue
+      rememberFinger(gesture.samples, reading.timeStamp / 1000, point.x, point.y)
     }
-    const desiredX = gesture.finger.x - gesture.offsetX
-    const desiredY = -gesture.finger.y + gesture.offsetY
-    let dx = desiredX - piece.anchor.position.x
-    let dy = desiredY - piece.anchor.position.y
-    if (gesture.fast?.axis === 'x') dy = 0
-    if (gesture.fast?.axis === 'y') dx = 0
-    followFinger(piece, dx, dy, pieces)
   }
 
   const onUp = (event: PointerEvent) => {
@@ -211,6 +186,18 @@ export function mountSlideGame(
       return height
     },
     update(dt) {
+      if (gesture) {
+        followHold(
+          gesture.piece,
+          pieces,
+          gesture.finger,
+          gesture.grab,
+          gesture.pressX,
+          gesture.pressY,
+          gesture.samples,
+          performance.now() / 1000,
+        )
+      }
       if (landing && landing.piece !== held && landing.piece.alive) {
         const dx = landing.x - landing.piece.anchor.position.x
         const dy = landing.y - landing.piece.anchor.position.y
@@ -225,8 +212,9 @@ export function mountSlideGame(
           landing.piece.anchor.position.y += (dy / dist) * step
         }
       }
-      const ready = held && canLeave(held, pieces) ? [held.mesh] : []
-    hint.set(ready)
+      hintTargets.length = 0
+      if (held && canLeave(held, pieces)) hintTargets.push(held.mesh)
+      hint.set(hintTargets)
     hint.step(dt)
     stepShatters(shatters, -DESIGN_HEIGHT - SHATTER.chip, dt)
       for (let i = shatters.length - 1; i >= 0; i--) {
@@ -248,12 +236,19 @@ export function mountSlideGame(
       }
     },
     renderOverlay(renderer, camera) {
-      const active = pieces.filter((piece) => piece.alive && piece.outline.visible)
+      outlined.length = 0
+      for (let i = 0; i < pieces.length; i++) {
+        const piece = pieces[i]
+        if (piece.alive && piece.outline.visible) outlined.push(piece)
+      }
+      const active = outlined
       if (active.length === 0) return
+      maskRestore.length = 0
       for (const piece of active) {
         piece.mesh.layers.enable(1)
         const material = piece.mesh.material
-        if (material instanceof THREE.Material) material.colorWrite = false
+        maskRestore.push(material instanceof THREE.Material ? material : maskMaterial)
+        piece.mesh.material = maskMaterial
       }
       const autoClear = renderer.autoClear
       const background = scene.background
@@ -265,13 +260,13 @@ export function mountSlideGame(
       camera.layers.set(0)
       renderer.autoClear = autoClear
       scene.background = background
-      for (const piece of active) {
-        piece.mesh.layers.disable(1)
-        const material = piece.mesh.material
-        if (material instanceof THREE.Material) material.colorWrite = true
+      for (let i = 0; i < active.length; i++) {
+        active[i].mesh.layers.disable(1)
+        active[i].mesh.material = maskRestore[i]
       }
     },
     dispose() {
+      if (gesture) releaseFinger(gesture.samples)
       stage.removeEventListener('pointerdown', onDown)
       stage.removeEventListener('lostpointercapture', onLostCapture)
       stage.removeEventListener('pointermove', onMove)
@@ -281,8 +276,12 @@ export function mountSlideGame(
   }
 }
 
+const chipPool: { x: number; y: number }[] = []
+const chips: { x: number; y: number }[] = []
+
 function chipPoints(piece: StagePiece): { x: number; y: number }[] {
-  const points: { x: number; y: number }[] = []
+  for (let i = 0; i < chips.length; i++) chipPool.push(chips[i])
+  chips.length = 0
   const step = SHATTER.step
   for (const local of piece.locals) {
     const x0 = piece.anchor.position.x + local.x - piece.half
@@ -291,14 +290,14 @@ function chipPoints(piece: StagePiece): { x: number; y: number }[] {
     const count = Math.max(1, Math.round(side / step))
     for (let col = 0; col < count; col++) {
       for (let row = 0; row < count; row++) {
-        points.push({
-          x: x0 + ((col + 0.5) * side) / count,
-          y: y0 + ((row + 0.5) * side) / count,
-        })
+        const point = chipPool.pop() ?? { x: 0, y: 0 }
+        point.x = x0 + ((col + 0.5) * side) / count
+        point.y = y0 + ((row + 0.5) * side) / count
+        chips.push(point)
       }
     }
   }
-  return points
+  return chips
 }
 
 function pieceColor(piece: StagePiece): number {

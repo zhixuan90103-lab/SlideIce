@@ -164,6 +164,9 @@ export function mountStage(scene: THREE.Scene): StageRig {
         transparent: true,
         opacity: 0,
         depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
         toneMapped: false,
       }),
     )

@@ -23,6 +23,25 @@ import {
 import { applyNativeClass, applySafeAreaCssVars } from './adapt/safeArea';
 import { createRenderer, resizeToDesign } from './create-renderer';
 
+function mountFps(): (frame: number) => void {
+  const root = document.getElementById('ui-root');
+  const node = document.createElement('div');
+  node.className = 'fps';
+  node.textContent = 'FPS --';
+  root?.appendChild(node);
+  let smooth = 0;
+  let shown = -1;
+  return (frame: number) => {
+    if (frame <= 0) return;
+    const fps = 1 / frame;
+    smooth = smooth === 0 ? fps : smooth * 0.9 + fps * 0.1;
+    const next = Math.round(smooth);
+    if (next === shown) return;
+    shown = next;
+    node.textContent = `FPS ${next}`;
+  };
+}
+
 function mountLookTune(camera: THREE.PerspectiveCamera, game: SlideGame): void {
   const root = document.getElementById('ui-root');
   if (!root) return;
@@ -187,6 +206,7 @@ async function boot(): Promise<void> {
     log();
   }
 
+  const fps = mountFps();
   game = mountSlideGame(scene, stage, () => latestLayout);
   look.topZ = game.setPieceHeight(40);
   look.pitch = -15;
@@ -196,8 +216,10 @@ async function boot(): Promise<void> {
 
   renderer.setAnimationLoop(() => {
     const now = performance.now();
-    const dt = Math.min(0.05, (now - last) / 1000);
+    const frame = Math.max(0, (now - last) / 1000);
+    const dt = Math.min(0.05, frame);
     last = now;
+    fps(frame);
     game?.update(dt);
     renderer.render(scene, camera);
     game?.renderOverlay(renderer, camera);
