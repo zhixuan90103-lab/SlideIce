@@ -3,7 +3,8 @@
  *   world x = design x
  *   world y = -design y
  * Pieces on the stage follow the finger in that plane.
- * A press lifts the piece. Release drops it, and the center decides if it has left the grid.
+ * A press lifts the piece. The pressed point follows the finger.
+ * Release removes the piece when most of its area is outside the board, and lands it on cells otherwise.
  */
 
 import * as THREE from 'three'
@@ -11,15 +12,40 @@ import { DESIGN_HEIGHT, DESIGN_WIDTH, type StageLayout } from '../adapt/design'
 import { mountHint } from './hint'
 import { freshPraise, notePraiseClear, showPraise } from './praise'
 import { SHATTER, disposeShatter, makeShatter, stepShatters, type Shatter } from './shatter'
-import { freshContact, noteSteps, resetContact, stepContact, type Contact } from './contact'
-import { filterFinger, followFinger, pieceAt, seedFinger, type FingerFilter } from './slide'
-import { centerInGrid, mountStage, type StagePiece } from './stage'
+import {
+  chooseFastAxis,
+  easeFinger,
+  FAST_MIN,
+  FAST_SPAN,
+  FAST_SPEED,
+  FAST_WINDOW,
+  followFinger,
+  canLeave,
+  gridSnap,
+  pieceAt,
+  seedFinger,
+  type AxisLock,
+  type Finger,
+} from './slide'
+import { mountStage, type StagePiece } from './stage'
+
+type Sample = { t: number; x: number; y: number }
 
 type Gesture = {
   id: number
   piece: StagePiece
-  filter: FingerFilter
+  finger: Finger
+  offsetX: number
+  offsetY: number
+  pressX: number
+  pressY: number
+  samples: Sample[]
+  fast: AxisLock | null
 }
+
+type Landing = { piece: StagePiece; x: number; y: number }
+
+const LAND_SPEED = 900
 
 export type SlideGame = {
   update(dt: number): void
@@ -55,12 +81,12 @@ export function mountSlideGame(
   for (const piece of pieces) lifts.set(piece, 0)
 
   let gesture: Gesture | null = null
+  let landing: Landing | null = null
   let ended = false
   let held: StagePiece | null = null
   const shatters: Shatter[] = []
   const praise = freshPraise()
   const hint = mountHint()
-  const contact: Contact = freshContact()
   const designOf = (event: PointerEvent): { x: number; y: number } | null => {
     const layout = getLayout()
     if (!layout) return null
@@ -77,18 +103,20 @@ export function mountSlideGame(
   const release = (piece: StagePiece) => {
     gesture = null
     held = null
-    resetContact(contact)
     piece.mesh.position.x = 0
     piece.mesh.position.y = 0
     const { x, y } = piece.anchor.position
-    if (!centerInGrid(x, y)) {
+    if (canLeave(piece, pieces)) {
+      if (landing?.piece === piece) landing = null
       piece.alive = false
       piece.mesh.visible = false
       const burst = makeShatter(scene, chipPoints(piece), x, y, pieceColor(piece))
       if (burst) shatters.push(burst)
       showPraise(x, -y, notePraiseClear(praise, 1))
       if (pieces.every((item) => !item.alive)) ended = true
+      return
     }
+    landing = { piece, ...gridSnap(piece, pieces) }
   }
 
   const onDown = (event: PointerEvent) => {
@@ -97,6 +125,7 @@ export function mountSlideGame(
     // A second finger while the first is still held does not start a gesture.
     // A new press after a missed pointerup takes over, so the next piece is not lost.
     if (gesture && gesture.id !== event.pointerId && stage.hasPointerCapture(gesture.id)) return
+    if (landing) landing = null
     if (gesture) release(gesture.piece)
     const point = designOf(event)
     if (!point || !inDesign(point.x, point.y)) return
@@ -104,12 +133,16 @@ export function mountSlideGame(
     if (!hit) return
     stage.setPointerCapture(event.pointerId)
     held = hit
-    contact.originX = hit.anchor.position.x
-    contact.originY = hit.anchor.position.y
     gesture = {
       id: event.pointerId,
       piece: hit,
-      filter: seedFinger(event.timeStamp, point.x, point.y),
+      finger: seedFinger(point.x, point.y),
+      offsetX: point.x - hit.anchor.position.x,
+      offsetY: point.y + hit.anchor.position.y,
+      pressX: point.x,
+      pressY: point.y,
+      samples: [{ t: event.timeStamp / 1000, x: point.x, y: point.y }],
+      fast: null,
     }
   }
 
@@ -118,8 +151,32 @@ export function mountSlideGame(
     const point = designOf(event)
     if (!point) return
     const piece = gesture.piece
-    const step = filterFinger(gesture.filter, event.timeStamp, point.x, point.y)
-    noteSteps(contact, followFinger(piece, step.x, -step.y, pieces))
+    easeFinger(gesture.finger, point.x, point.y)
+    const now = event.timeStamp / 1000
+    gesture.samples.push({ t: now, x: gesture.finger.x, y: gesture.finger.y })
+    const windowStart = now - FAST_WINDOW
+    while (gesture.samples.length > 2 && gesture.samples[0].t < windowStart) gesture.samples.shift()
+    const first = gesture.samples[0]
+    const last = gesture.samples[gesture.samples.length - 1]
+    const span = last.t - first.t
+    const recent = Math.hypot(last.x - first.x, last.y - first.y)
+    const stroke = Math.hypot(gesture.finger.x - gesture.pressX, gesture.finger.y - gesture.pressY)
+    const fastNow = span >= FAST_SPAN && recent / span >= FAST_SPEED && stroke >= FAST_MIN
+    if (fastNow) {
+      gesture.fast = chooseFastAxis(piece, last.x - first.x, -(last.y - first.y), pieces)
+      // The ignored axis is rebased to the piece, so this sample's cross motion is not owed.
+      if (gesture.fast.axis === 'x') gesture.offsetY = piece.anchor.position.y + gesture.finger.y
+      else gesture.offsetX = gesture.finger.x - piece.anchor.position.x
+    } else {
+      gesture.fast = null
+    }
+    const desiredX = gesture.finger.x - gesture.offsetX
+    const desiredY = -gesture.finger.y + gesture.offsetY
+    let dx = desiredX - piece.anchor.position.x
+    let dy = desiredY - piece.anchor.position.y
+    if (gesture.fast?.axis === 'x') dy = 0
+    if (gesture.fast?.axis === 'y') dx = 0
+    followFinger(piece, dx, dy, pieces)
   }
 
   const onUp = (event: PointerEvent) => {
@@ -154,7 +211,21 @@ export function mountSlideGame(
       return height
     },
     update(dt) {
-      const ready = held && !centerInGrid(held.anchor.position.x, held.anchor.position.y) ? [held.mesh] : []
+      if (landing && landing.piece !== held && landing.piece.alive) {
+        const dx = landing.x - landing.piece.anchor.position.x
+        const dy = landing.y - landing.piece.anchor.position.y
+        const dist = Math.hypot(dx, dy)
+        const step = LAND_SPEED * dt
+        if (dist <= step || dist < 0.01) {
+          landing.piece.anchor.position.x = landing.x
+          landing.piece.anchor.position.y = landing.y
+          landing = null
+        } else {
+          landing.piece.anchor.position.x += (dx / dist) * step
+          landing.piece.anchor.position.y += (dy / dist) * step
+        }
+      }
+      const ready = held && canLeave(held, pieces) ? [held.mesh] : []
     hint.set(ready)
     hint.step(dt)
     stepShatters(shatters, -DESIGN_HEIGHT - SHATTER.chip, dt)
@@ -175,7 +246,6 @@ export function mountSlideGame(
         if (stroke instanceof THREE.MeshBasicMaterial) stroke.opacity = next
         piece.outline.visible = next > 0.02
       }
-      stepContact(contact, held, dt)
     },
     renderOverlay(renderer, camera) {
       const active = pieces.filter((piece) => piece.alive && piece.outline.visible)

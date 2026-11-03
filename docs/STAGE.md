@@ -9,9 +9,8 @@
 | `src/game/level.ts` | 这一关的占格和颜色。 |
 | `src/game/look.ts` | 光、相机、块尺寸的默认值。设置面板改的就是这一份。 |
 | `src/game/stage.ts` | 天空、光、阴影、底板、格子、六块挤出体、拿起描边。没有墙。 |
-| `src/game/play.ts` | 指针、抬起、松手脱离。入口是 `mountSlideGame`。 |
-| `src/game/slide.ts` | 跟手。每一帧只走这一下的新位移，慢时滤波。角挡住时另一轴只留这一下的剩余分量。 |
-| `src/game/contact.ts` | 撞上时的后退和持续抖动。只动网格，不动锚点。 |
+| `src/game/play.ts` | 指针、抬起、快滑按最近一小段认轴并把丢掉的轴拨开、松手消除或落格。入口是 `mountSlideGame`。 |
+| `src/game/slide.ts` | 跟手、细抖动插值、解锁方向、落点和出界面积。 |
 | `src/game/hint.ts` | 松手就会脱离时的发亮。不挡操作。 |
 | `src/game/shatter.ts` | 离场碎块。不挡操作。 |
 | `src/game/praise.ts` | 离场文字。只往上飘。不挡操作。 |

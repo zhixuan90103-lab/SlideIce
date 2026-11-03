@@ -61,9 +61,25 @@ export type StageRig = {
   setRoughness(roughness: number): void
 }
 
-/** Piece center is inside the 5×5 cell area. World x right, world y up. */
+/** Current level board. World x right, world y up. The size follows the drawn grid, not a fixed 5×5. */
+export function boardRect(): { minX: number; maxX: number; minY: number; maxY: number } {
+  return { minX: ORIGIN_X, maxX: ORIGIN_X + BOARD, minY: -(ORIGIN_Y + BOARD), maxY: -ORIGIN_Y }
+}
+
+/** Piece center is inside the current level board. */
 export function centerInGrid(x: number, y: number): boolean {
-  return x >= ORIGIN_X && x <= ORIGIN_X + BOARD && y <= -ORIGIN_Y && y >= -(ORIGIN_Y + BOARD)
+  const board = boardRect()
+  return x >= board.minX && x <= board.maxX && y <= board.maxY && y >= board.minY
+}
+
+/** Nearest board-lattice cell center. The lattice continues past the board. */
+export function nearestCellCenter(x: number, y: number): { x: number; y: number } {
+  const col = Math.round((x - ORIGIN_X) / CELL - 0.5)
+  const row = Math.round((-y - ORIGIN_Y) / CELL - 0.5)
+  return {
+    x: ORIGIN_X + (col + 0.5) * CELL,
+    y: -(ORIGIN_Y + (row + 0.5) * CELL),
+  }
 }
 
 export function mountStage(scene: THREE.Scene): StageRig {

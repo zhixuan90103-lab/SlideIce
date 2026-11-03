@@ -1,10 +1,11 @@
 /**
- * Move a piece by this event's finger step. Collision reads anchors only.
- * Both axes follow. A corner stops the blocked axis at contact and keeps
- * only the rest of this step on the open axis.
+ * Finger follow. The pressed point tracks a smoothed finger.
+ * A real move arrives on the finger. Motion smaller than the jitter band is eased.
+ * A fast swipe locks one axis for the latest segment. Collision stops at the first contact and does not tunnel.
  */
 
-import type { StagePiece } from './stage'
+import { CELL } from './look'
+import { boardRect, nearestCellCenter, type StagePiece } from './stage'
 
 export type AxisStep = {
   axis: 'x' | 'y'
@@ -13,48 +14,33 @@ export type AxisStep = {
   blocked: boolean
 }
 
-/** 1€ filter: slow motion stays smooth, fast motion stays with the finger. */
-const MIN_CUTOFF = 1.5
-const BETA = 0.8
-const D_CUTOFF = 1
+/** Phone-tuning starts. A step inside this band is eased instead of copied. */
+const JITTER_PX = 6
+const JITTER_BLEND = 0.4
+/** Speed over the recent window, after the stroke is at least this long. */
+export const FAST_SPEED = 2200
+export const FAST_WINDOW = 0.08
+export const FAST_SPAN = 0.05
+export const FAST_MIN = 28
+/** Share of the stroke that must point along an open exit before that exit wins. */
+const TREND = 0.6
 
-export type FingerFilter = {
-  t: number
-  x: number
-  y: number
-  dx: number
-  dy: number
+export type Finger = { x: number; y: number }
+
+export function seedFinger(x: number, y: number): Finger {
+  return { x, y }
 }
 
-export function seedFinger(t: number, x: number, y: number): FingerFilter {
-  return { t, x, y, dx: 0, dy: 0 }
-}
-
-function smoothAlpha(dt: number, cutoff: number): number {
-  const r = 2 * Math.PI * cutoff * dt
-  return r / (r + 1)
-}
-
-/** Smoothed step, in design pixels. `t` is `event.timeStamp` in milliseconds. */
-export function filterFinger(filter: FingerFilter, t: number, x: number, y: number): { x: number; y: number } {
-  const dt = (t - filter.t) / 1000
-  if (!(dt > 0)) return { x: 0, y: 0 }
-  const derivative = smoothAlpha(dt, D_CUTOFF)
-  const dx = (x - filter.x) / dt
-  const dy = (y - filter.y) / dt
-  const dxHat = derivative * dx + (1 - derivative) * filter.dx
-  const dyHat = derivative * dy + (1 - derivative) * filter.dy
-  const ax = smoothAlpha(dt, MIN_CUTOFF + BETA * Math.abs(dxHat))
-  const ay = smoothAlpha(dt, MIN_CUTOFF + BETA * Math.abs(dyHat))
-  const xHat = ax * x + (1 - ax) * filter.x
-  const yHat = ay * y + (1 - ay) * filter.y
-  const stepX = xHat - filter.x
-  const stepY = yHat - filter.y
-  filter.t = t
-  filter.x = xHat
-  filter.y = yHat
-  filter.dx = dxHat
-  filter.dy = dyHat
+/** Design-pixel finger. A step of JITTER_PX or more is copied. A smaller step is blended. */
+export function easeFinger(finger: Finger, x: number, y: number): { x: number; y: number } {
+  const dx = x - finger.x
+  const dy = y - finger.y
+  const dist = Math.hypot(dx, dy)
+  const gain = dist >= JITTER_PX ? 1 : JITTER_BLEND
+  const stepX = dx * gain
+  const stepY = dy * gain
+  finger.x += stepX
+  finger.y += stepY
   return { x: stepX, y: stepY }
 }
 
@@ -81,6 +67,109 @@ export function followFinger(piece: StagePiece, dx: number, dy: number, pieces: 
   return [primary, { axis: secondaryAxis, amount: secondaryAmount, moved: approached.moved + slid.moved, blocked: slid.blocked }]
 }
 
+export type AxisLock = { axis: 'x' | 'y'; sign: number }
+
+/** Longer axis of this segment, unless the segment trends along an open exit. */
+export function chooseFastAxis(piece: StagePiece, strokeX: number, strokeY: number, pieces: readonly StagePiece[]): AxisLock {
+  const longer: AxisLock =
+    Math.abs(strokeX) >= Math.abs(strokeY) ? { axis: 'x', sign: Math.sign(strokeX) || 1 } : { axis: 'y', sign: Math.sign(strokeY) || 1 }
+  const length = Math.hypot(strokeX, strokeY)
+  if (length === 0) return longer
+  let best: AxisLock | null = null
+  let bestAlong = 0
+  for (const candidate of unlockAxes(piece, pieces)) {
+    const along = candidate.axis === 'x' ? strokeX * candidate.sign : strokeY * candidate.sign
+    if (along > bestAlong) {
+      bestAlong = along
+      best = candidate
+    }
+  }
+  if (best && bestAlong >= length * TREND) return best
+  return longer
+}
+
+/**
+ * Nearest on-lattice pose that does not overlap another piece.
+ * Same Manhattan distance: smaller column offset, then smaller row offset.
+ * Nothing within 12 cells leaves the piece where it is.
+ */
+export function gridSnap(piece: StagePiece, pieces: readonly StagePiece[]): { x: number; y: number } {
+  const local = piece.locals[0]
+  const ax = piece.anchor.position.x
+  const ay = piece.anchor.position.y
+  if (!local) return { x: ax, y: ay }
+  const cell = nearestCellCenter(ax + local.x, ay + local.y)
+  const baseX = cell.x - local.x
+  const baseY = cell.y - local.y
+  const others = pieces.filter((item) => item !== piece && item.alive)
+  for (let distance = 0; distance <= 12; distance++) {
+    for (let dc = -distance; dc <= distance; dc++) {
+      for (let dr = -distance; dr <= distance; dr++) {
+        if (Math.abs(dc) + Math.abs(dr) !== distance) continue
+        const x = baseX + dc * CELL
+        const y = baseY - dr * CELL
+        if (!cellsOnBoard(piece, x, y) || overlaps(piece, x, y, others)) continue
+        return { x, y }
+      }
+    }
+  }
+  return { x: ax, y: ay }
+}
+
+/**
+ * The piece is already past the board edge, and the rest of that exit is clear.
+ * A piece still fully on the board cannot leave yet. One that would stop half out cannot either.
+ */
+export function canLeave(piece: StagePiece, pieces: readonly StagePiece[], x = piece.anchor.position.x, y = piece.anchor.position.y): boolean {
+  if (outsideFraction(piece, x, y) <= 0) return false
+  const others = pieces.filter((item) => item !== piece && item.alive)
+  for (const side of crossedSides(piece, x, y)) {
+    const dist = exitDistance(piece, x, y, side)
+    if (dist <= 0.01) return true
+    const dx = side.axis === 'x' ? side.sign * dist : 0
+    const dy = side.axis === 'y' ? side.sign * dist : 0
+    if (sweepStop(piece, x, y, dx, dy, others) >= 1) return true
+  }
+  return false
+}
+
+/** Share of the visible cubes that lies outside the current board. Gaps are not area. */
+export function outsideFraction(piece: StagePiece, x = piece.anchor.position.x, y = piece.anchor.position.y): number {
+  const board = boardRect()
+  const side = piece.half * 2
+  if (side <= 0 || piece.locals.length === 0) return 0
+  let outside = 0
+  for (const local of piece.locals) {
+    const left = x + local.x - piece.half
+    const right = x + local.x + piece.half
+    const bottom = y + local.y - piece.half
+    const top = y + local.y + piece.half
+    const width = overlap(left, right, board.minX, board.maxX)
+    const height = overlap(bottom, top, board.minY, board.maxY)
+    outside += side * side - width * height
+  }
+  return outside / (piece.locals.length * side * side)
+}
+
+function unlockAxes(piece: StagePiece, pieces: readonly StagePiece[]): AxisLock[] {
+  const others = pieces.filter((item) => item !== piece && item.alive)
+  const found: AxisLock[] = []
+  for (const candidate of [
+    { axis: 'x' as const, sign: 1 },
+    { axis: 'x' as const, sign: -1 },
+    { axis: 'y' as const, sign: 1 },
+    { axis: 'y' as const, sign: -1 },
+  ]) {
+    const ox = piece.anchor.position.x
+    const oy = piece.anchor.position.y
+    const dist = exitDistance(piece, ox, oy, candidate)
+    const dx = candidate.axis === 'x' ? candidate.sign * dist : 0
+    const dy = candidate.axis === 'y' ? candidate.sign * dist : 0
+    if (dist <= 0.01 || sweepStop(piece, ox, oy, dx, dy, others) >= 1) found.push(candidate)
+  }
+  return found
+}
+
 function moveAxis(piece: StagePiece, axis: 'x' | 'y', amount: number, others: readonly StagePiece[]): AxisStep {
   if (amount === 0) return { axis, amount: 0, moved: 0, blocked: false }
   const dx = axis === 'x' ? amount : 0
@@ -100,7 +189,6 @@ function moveAxis(piece: StagePiece, axis: 'x' | 'y', amount: number, others: re
   return { axis, amount, moved: amount * t, blocked: true }
 }
 
-/** First fraction of the move that touches another piece. 1 means the whole move is clear. */
 function sweepStop(
   piece: StagePiece,
   ox: number,
@@ -144,6 +232,60 @@ function overlaps(piece: StagePiece, x: number, y: number, others: readonly Stag
     }
   }
   return false
+}
+
+function cellsOnBoard(piece: StagePiece, x: number, y: number): boolean {
+  const board = boardRect()
+  const count = Math.round((board.maxX - board.minX) / CELL)
+  for (const local of piece.locals) {
+    const col = Math.round((x + local.x - board.minX) / CELL - 0.5)
+    const row = Math.round((board.maxY - (y + local.y)) / CELL - 0.5)
+    if (col < 0 || row < 0 || col >= count || row >= count) return false
+  }
+  return true
+}
+
+function crossedSides(piece: StagePiece, x: number, y: number): AxisLock[] {
+  const board = boardRect()
+  const sides: AxisLock[] = []
+  let east = false
+  let west = false
+  let north = false
+  let south = false
+  for (const local of piece.locals) {
+    const left = x + local.x - piece.half
+    const right = x + local.x + piece.half
+    const bottom = y + local.y - piece.half
+    const top = y + local.y + piece.half
+    if (right > board.maxX) east = true
+    if (left < board.minX) west = true
+    if (top > board.maxY) north = true
+    if (bottom < board.minY) south = true
+  }
+  if (east) sides.push({ axis: 'x', sign: 1 })
+  if (west) sides.push({ axis: 'x', sign: -1 })
+  if (north) sides.push({ axis: 'y', sign: 1 })
+  if (south) sides.push({ axis: 'y', sign: -1 })
+  return sides
+}
+
+/** Distance along a signed axis until every visible cube is past that edge. */
+function exitDistance(piece: StagePiece, x: number, y: number, side: AxisLock): number {
+  const board = boardRect()
+  let need = 0
+  for (const local of piece.locals) {
+    const cx = x + local.x
+    const cy = y + local.y
+    if (side.axis === 'x' && side.sign > 0) need = Math.max(need, board.maxX - (cx - piece.half))
+    if (side.axis === 'x' && side.sign < 0) need = Math.max(need, cx + piece.half - board.minX)
+    if (side.axis === 'y' && side.sign > 0) need = Math.max(need, board.maxY - (cy - piece.half))
+    if (side.axis === 'y' && side.sign < 0) need = Math.max(need, cy + piece.half - board.minY)
+  }
+  return need
+}
+
+function overlap(a0: number, a1: number, b0: number, b1: number): number {
+  return Math.max(0, Math.min(a1, b1) - Math.max(a0, b0))
 }
 
 export function pieceAt(x: number, y: number, pieces: readonly StagePiece[]): StagePiece | null {
