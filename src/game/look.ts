@@ -53,7 +53,6 @@ export const look = {
 export const SKY = ['#4aa8ee', '#79c6f8', '#9ed8fb'] as const
 export const BOARD_COLOR = 0xfaf7f3
 export const BOARD_ROUGHNESS = 0.62
-export const CUBE_COLOR = 0xf27b4e
 export const PLASTIC_ROUGHNESS = 0.42
 export const PLASTIC_METALNESS = 0.02
 
@@ -68,6 +67,3 @@ export const FLOOR_TOP = -7
 
 export const FLOOR_BEVEL = 6
 export const FLOOR_THICK = 24
-
-export const CUBE_DIV = 12
-export const CUBE_BEVEL_SEG = 24

@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { DESIGN_HEIGHT, DESIGN_WIDTH } from '../adapt/design'
+import { LEVEL } from './level'
 import {
   BOARD_GRID,
   CELL,
@@ -25,49 +26,6 @@ import {
 
 const GAP = 4
 const BOARD = BOARD_GRID * CELL
-
-/** Row 0 is the top of the screen. One entry per colored piece in the hand-drawn level. */
-const PIECES: readonly (readonly [number, number][])[] = [
-  [
-    [0, 0],
-    [1, 0],
-    [2, 0],
-    [0, 1],
-  ],
-  [
-    [3, 0],
-    [4, 0],
-    [4, 1],
-    [4, 2],
-  ],
-  [
-    [1, 1],
-    [2, 1],
-    [3, 1],
-    [2, 2],
-  ],
-  [
-    [0, 2],
-    [1, 2],
-    [0, 3],
-    [0, 4],
-    [1, 4],
-  ],
-  [
-    [1, 3],
-    [2, 3],
-    [2, 4],
-    [3, 4],
-  ],
-  [
-    [3, 2],
-    [3, 3],
-    [4, 3],
-    [4, 4],
-  ],
-]
-/** Same saturation and lightness. Hue only: red, blue, green, yellow, purple, coral. */
-const PIECE_COLORS = [0xe1477f, 0x4775e1, 0x47e17f, 0xb3e147, 0xbd47e1, 0xe15b47]
 const ORIGIN_X = (DESIGN_WIDTH - BOARD) / 2
 const ORIGIN_Y = (DESIGN_HEIGHT - BOARD) / 2
 
@@ -152,7 +110,7 @@ export function mountStage(scene: THREE.Scene): StageRig {
     metalness: 0,
   })
   boardMat.shadowSide = THREE.BackSide
-  const pieceMats = PIECE_COLORS.map(
+  const pieceMats = LEVEL.map((piece) => piece.color).map(
     (color) =>
       new THREE.MeshStandardMaterial({
         color,
@@ -169,13 +127,13 @@ export function mountStage(scene: THREE.Scene): StageRig {
   floor.position.set(ORIGIN_X + BOARD / 2, -(ORIGIN_Y + BOARD / 2), floorZ())
   scene.add(floor, makeGrid())
 
-  const pieces: StagePiece[] = PIECES.map((cells, index) => {
+  const pieces: StagePiece[] = LEVEL.map((piece, index) => {
     const mesh = new THREE.Mesh(new THREE.BufferGeometry(), pieceMats[index])
     mesh.castShadow = true
     mesh.receiveShadow = true
     mesh.position.z = FLOOR_TOP
     scene.add(mesh)
-    return { mesh, cells, locals: [], half: 0, height: 0, restZ: FLOOR_TOP, alive: true }
+    return { mesh, cells: piece.cells, locals: [], half: 0, height: 0, restZ: FLOOR_TOP, alive: true }
   })
 
   const placeCube = (size: number, corner: number, edge: number) => {

@@ -9,7 +9,7 @@
 | [docs/ENTRYPOINTS.md](./docs/ENTRYPOINTS.md) | 入口与调用链 |
 | [docs/MERGE.md](./docs/MERGE.md) | 双工程优点对照与合并说明 |
 | [docs/AUDIO.md](./docs/AUDIO.md) | 音效方案（预解码 + 每帧一批 + 原生池） |
-| [docs/GAME.md](./docs/GAME.md) | 当前玩法规范（木盒里的木块） |
+| [docs/GAME.md](./docs/GAME.md) | 当前玩法（5×5 滑块） |
 | [docs/HAPTICS.md](./docs/HAPTICS.md) | 震动如何一次接对（插件注册 + 玩法层） |
 
 ## 30 秒上手
@@ -21,7 +21,7 @@ npm run dev
 # → http://127.0.0.1:5193/
 ```
 
-应看到：桌面手机框、木盒里的第一关、右上角 **手机/Pad** 切换。规则在 [docs/GAME.md](./docs/GAME.md)。
+应看到：桌面手机框、5×5 六色滑块、右上角 **手机/Pad** 切换。规则在 [docs/GAME.md](./docs/GAME.md)，画面在 [docs/STAGE.md](./docs/STAGE.md)。
 
 ## 合并了什么
 
