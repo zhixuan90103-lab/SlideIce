@@ -1,12 +1,10 @@
 import * as THREE from 'three'
 import { DESIGN_HEIGHT, DESIGN_WIDTH } from '../adapt/design'
-import { GRID } from './level'
 import {
+  BOARD_GRID,
+  CELL,
   BOARD_COLOR,
   BOARD_ROUGHNESS,
-  CUBE_BEVEL_SEG,
-  CUBE_COLOR,
-  CUBE_DIV,
   FILL_COLOR,
   FLOOR_BEVEL,
   FLOOR_THICK,
@@ -19,20 +17,73 @@ import {
   SHADOW_OPACITY,
   SHADOW_Z,
   SKY,
-  TRAY_BEVEL,
   TRAY_BEVEL_SIZE,
   TRAY_LIP,
   TRAY_MARGIN,
   look,
 } from './look'
 
-const CELL = 64
 const GAP = 4
-const BOARD = GRID * CELL
+const BOARD = BOARD_GRID * CELL
+
+/** Row 0 is the top of the screen. One entry per colored piece in the hand-drawn level. */
+const PIECES: readonly (readonly [number, number][])[] = [
+  [
+    [0, 0],
+    [1, 0],
+    [2, 0],
+    [0, 1],
+  ],
+  [
+    [3, 0],
+    [4, 0],
+    [4, 1],
+    [4, 2],
+  ],
+  [
+    [1, 1],
+    [2, 1],
+    [3, 1],
+    [2, 2],
+  ],
+  [
+    [0, 2],
+    [1, 2],
+    [0, 3],
+    [0, 4],
+    [1, 4],
+  ],
+  [
+    [1, 3],
+    [2, 3],
+    [2, 4],
+    [3, 4],
+  ],
+  [
+    [3, 2],
+    [3, 3],
+    [4, 3],
+    [4, 4],
+  ],
+]
+/** Same saturation and lightness. Hue only: red, blue, green, yellow, purple, coral. */
+const PIECE_COLORS = [0xe1477f, 0x4775e1, 0x47e17f, 0xb3e147, 0xbd47e1, 0xe15b47]
 const ORIGIN_X = (DESIGN_WIDTH - BOARD) / 2
 const ORIGIN_Y = (DESIGN_HEIGHT - BOARD) / 2
 
+export type StagePiece = {
+  mesh: THREE.Mesh
+  cells: readonly (readonly [number, number])[]
+  /** Cell centers relative to the mesh origin. */
+  locals: { x: number; y: number }[]
+  half: number
+  height: number
+  restZ: number
+  alive: boolean
+}
+
 export type StageRig = {
+  pieces: StagePiece[]
   setLights(
     keyIntensity: number,
     keyAzimuth: number,
@@ -44,6 +95,11 @@ export type StageRig = {
   ): void
   setCube(size: number, corner: number, edge: number): void
   setRoughness(roughness: number): void
+}
+
+/** Piece center is inside the 5×5 cell area. World x right, world y up. */
+export function centerInGrid(x: number, y: number): boolean {
+  return x >= ORIGIN_X && x <= ORIGIN_X + BOARD && y <= -ORIGIN_Y && y >= -(ORIGIN_Y + BOARD)
 }
 
 export function mountStage(scene: THREE.Scene): StageRig {
@@ -61,10 +117,13 @@ export function mountStage(scene: THREE.Scene): StageRig {
   if ('blurSamples' in key.shadow) key.shadow.blurSamples = 16
   key.shadow.camera.near = 100
   key.shadow.camera.far = 2000
-  key.shadow.camera.left = -280
-  key.shadow.camera.right = 280
-  key.shadow.camera.top = 280
-  key.shadow.camera.bottom = -280
+  // Stage corners sit near ±480 in this light. Pieces can leave the screen by their own length, so the map is larger.
+  const shadowReach = 900
+  key.shadow.camera.left = -shadowReach
+  key.shadow.camera.right = shadowReach
+  key.shadow.camera.top = shadowReach
+  key.shadow.camera.bottom = -shadowReach
+  key.shadow.camera.updateProjectionMatrix()
   scene.add(ambient, hemi, key, fill, rim)
   scene.add(key.target)
   const aim = new THREE.Vector3(DESIGN_WIDTH / 2, -DESIGN_HEIGHT / 2, 0)
@@ -80,7 +139,7 @@ export function mountStage(scene: THREE.Scene): StageRig {
 
   scene.background = softSky()
   const shadowPlane = new THREE.Mesh(
-    new THREE.PlaneGeometry(DESIGN_WIDTH, DESIGN_HEIGHT),
+    new THREE.PlaneGeometry(DESIGN_WIDTH + 800, DESIGN_HEIGHT + 800),
     new THREE.ShadowMaterial({ opacity: SHADOW_OPACITY }),
   )
   shadowPlane.receiveShadow = true
@@ -93,51 +152,57 @@ export function mountStage(scene: THREE.Scene): StageRig {
     metalness: 0,
   })
   boardMat.shadowSide = THREE.BackSide
-  const cubeMat = new THREE.MeshStandardMaterial({
-    color: CUBE_COLOR,
-    roughness: PLASTIC_ROUGHNESS,
-    metalness: PLASTIC_METALNESS,
-    envMapIntensity: 0,
-  })
-  cubeMat.shadowSide = THREE.BackSide
+  const pieceMats = PIECE_COLORS.map(
+    (color) =>
+      new THREE.MeshStandardMaterial({
+        color,
+        roughness: PLASTIC_ROUGHNESS,
+        metalness: PLASTIC_METALNESS,
+        envMapIntensity: 0,
+      }),
+  )
+  for (const material of pieceMats) material.shadowSide = THREE.BackSide
 
-  const tray = new THREE.Mesh(new THREE.BufferGeometry(), boardMat)
-  tray.castShadow = true
-  tray.receiveShadow = true
-  tray.position.set(ORIGIN_X + BOARD / 2, -(ORIGIN_Y + BOARD / 2), FLOOR_TOP)
   const floor = new THREE.Mesh(new THREE.BufferGeometry(), boardMat)
+  floor.castShadow = true
   floor.receiveShadow = true
   floor.position.set(ORIGIN_X + BOARD / 2, -(ORIGIN_Y + BOARD / 2), floorZ())
-  scene.add(tray, floor, makeGrid())
+  scene.add(floor, makeGrid())
 
-  let cubeGeometry: THREE.BufferGeometry = new THREE.BufferGeometry()
-  const cubes: THREE.Mesh[] = []
-  for (let row = 0; row < GRID; row++) {
-    for (let col = 0; col < GRID; col++) {
-      const cube = new THREE.Mesh(cubeGeometry, cubeMat)
-      cube.castShadow = true
-      cube.receiveShadow = true
-      cube.position.set(ORIGIN_X + (col + 0.5) * CELL, -(ORIGIN_Y + (row + 0.5) * CELL), FLOOR_TOP)
-      scene.add(cube)
-      cubes.push(cube)
-    }
-  }
+  const pieces: StagePiece[] = PIECES.map((cells, index) => {
+    const mesh = new THREE.Mesh(new THREE.BufferGeometry(), pieceMats[index])
+    mesh.castShadow = true
+    mesh.receiveShadow = true
+    mesh.position.z = FLOOR_TOP
+    scene.add(mesh)
+    return { mesh, cells, locals: [], half: 0, height: 0, restZ: FLOOR_TOP, alive: true }
+  })
 
   const placeCube = (size: number, corner: number, edge: number) => {
     const bevel = Math.min(Math.max(1, edge), size / 2 - 1.5)
-    const next = evenCubeGeometry(size, corner, bevel)
-    cubeGeometry.dispose()
-    cubeGeometry = next
-    for (const cube of cubes) cube.geometry = cubeGeometry
-    tray.geometry.dispose()
-    tray.geometry = trayGeometry(size, corner, edge)
-    tray.position.z = FLOOR_TOP + TRAY_BEVEL
+    for (const piece of pieces) {
+      const next = pieceGeometry(piece.cells, size, corner, bevel)
+      const first = piece.half === 0
+      piece.mesh.geometry.dispose()
+      piece.mesh.geometry = next.geometry
+      if (first) {
+        piece.mesh.position.x = next.x
+        piece.mesh.position.y = next.y
+      }
+      piece.locals = piece.cells.map(([col, row]) => ({
+        x: ORIGIN_X + (col + 0.5) * CELL - next.x,
+        y: -(ORIGIN_Y + (row + 0.5) * CELL) - next.y,
+      }))
+      piece.half = size / 2
+      piece.height = size
+    }
     floor.geometry.dispose()
     floor.geometry = floorGeometry(size, corner, edge)
   }
   placeCube(look.size, look.corner, look.edge)
 
   return {
+    pieces,
     setLights(keyIntensity, keyAzimuth, keyElevation, fillIntensity, fillAzimuth, fillElevation, ambientIntensity) {
       ambient.intensity = 0
       hemi.intensity = ambientIntensity
@@ -151,7 +216,8 @@ export function mountStage(scene: THREE.Scene): StageRig {
       placeCube(Math.max(20, size), Math.max(2, corner), Math.max(1, edge))
     },
     setRoughness(roughness) {
-      cubeMat.roughness = Math.min(1, Math.max(0, roughness))
+      const value = Math.min(1, Math.max(0, roughness))
+      for (const material of pieceMats) material.roughness = value
     },
   }
 }
@@ -195,11 +261,11 @@ function gridTexture(): THREE.CanvasTexture {
   const ctx = canvas.getContext('2d')!
   ctx.fillStyle = '#faf7f3'
   ctx.fillRect(0, 0, size, size)
-  const cell = size / GRID
+  const cell = size / BOARD_GRID
   const gap = (GAP / CELL) * cell
   ctx.fillStyle = '#f3efe9'
-  for (let row = 0; row < GRID; row++) {
-    for (let col = 0; col < GRID; col++) {
+  for (let row = 0; row < BOARD_GRID; row++) {
+    for (let col = 0; col < BOARD_GRID; col++) {
       const x = col * cell + gap / 2
       const y = row * cell + gap / 2
       const w = cell - gap
@@ -239,19 +305,6 @@ function traySpans(size: number, corner: number, edge: number) {
   }
 }
 
-function trayGeometry(size: number, corner: number, edge: number): THREE.ExtrudeGeometry {
-  const span = traySpans(size, corner, edge)
-  const bar = new THREE.Shape()
-  roundLoop(bar, -span.outer / 2, -span.outer / 2, TRAY_LIP, span.outer, Math.min(span.outerRadius, TRAY_LIP / 2))
-  return new THREE.ExtrudeGeometry(bar, {
-    depth: Math.max(1, size - TRAY_BEVEL),
-    bevelEnabled: true,
-    bevelThickness: TRAY_BEVEL,
-    bevelSize: TRAY_BEVEL_SIZE,
-    bevelSegments: 8,
-  })
-}
-
 const FLOOR_BEVEL_SIZE = 2
 
 function floorGeometry(size: number, corner: number, edge: number): THREE.ExtrudeGeometry {
@@ -270,113 +323,116 @@ function floorGeometry(size: number, corner: number, edge: number): THREE.Extrud
   })
 }
 
-function snapRounded(x: number, y: number, half: number, radius: number): [number, number] {
-  const r = Math.min(Math.max(radius, 0), half - 0.001)
-  const lim = half - r
-  const sx = Math.sign(x) || 1
-  const sy = Math.sign(y) || 1
-  let ax = Math.min(Math.abs(x), half)
-  let ay = Math.min(Math.abs(y), half)
-  if (ax > lim && ay > lim) {
-    const dx = ax - lim
-    const dy = ay - lim
-    const len = Math.hypot(dx, dy)
-    if (len > r) {
-      ax = lim + (dx / len) * r
-      ay = lim + (dy / len) * r
-    }
+function pieceGeometry(
+  cells: readonly (readonly [number, number])[],
+  size: number,
+  corner: number,
+  bevel: number,
+): { geometry: THREE.BufferGeometry; x: number; y: number } {
+  const home = new THREE.Vector2()
+  for (const [col, row] of cells) {
+    home.x += ORIGIN_X + (col + 0.5) * CELL
+    home.y += -(ORIGIN_Y + (row + 0.5) * CELL)
   }
-  return [sx * ax, sy * ay]
+  home.multiplyScalar(1 / cells.length)
+  // ExtrudeGeometry flares the outline out by bevelSize and adds a bevel on both ends.
+  // The shape is the contracted cap, so the widest section lands on the cell body.
+  const margin = (CELL - size) / 2 + bevel
+  const outline = pieceOutline(cells, margin, Math.max(0.5, corner - bevel), home)
+  const shape = new THREE.Shape()
+  outline.forEach(([x, y], i) => (i === 0 ? shape.moveTo(x, y) : shape.lineTo(x, y)))
+  shape.closePath()
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: Math.max(1, size - bevel * 2),
+    bevelEnabled: true,
+    bevelThickness: bevel,
+    bevelSize: bevel,
+    bevelSegments: 8,
+    curveSegments: 1,
+  })
+  geometry.translate(0, 0, bevel)
+  return { geometry, x: home.x, y: home.y }
 }
 
-function evenCubeGeometry(size: number, corner: number, bevel: number): THREE.BufferGeometry {
-  const div = CUBE_DIV
-  const bevelSeg = CUBE_BEVEL_SEG
-  const halfIn = size / 2 - bevel
-  const radIn = Math.min(halfIn - 0.25, Math.max(0.5, corner - bevel))
-  const halfOut = size / 2
-  const radOut = Math.min(halfOut - 0.25, radIn + bevel)
-  const positions: number[] = []
-  const indices: number[] = []
-  const add = (x: number, y: number, z: number) => {
-    positions.push(x, y, z)
-    return positions.length / 3 - 1
+/** Outer silhouette in local world XY. Convex corners are rounded; concave corners stay sharp. */
+function pieceOutline(
+  cells: readonly (readonly [number, number])[],
+  inset: number,
+  radius: number,
+  home: THREE.Vector2,
+): [number, number][] {
+  const set = new Set(cells.map(([col, row]) => `${col},${row}`))
+  const has = (col: number, row: number) => set.has(`${col},${row}`)
+  const edges: [number, number, number, number][] = []
+  for (const [col, row] of cells) {
+    if (!has(col, row - 1)) edges.push([col, row, col + 1, row])
+    if (!has(col + 1, row)) edges.push([col + 1, row, col + 1, row + 1])
+    if (!has(col, row + 1)) edges.push([col + 1, row + 1, col, row + 1])
+    if (!has(col - 1, row)) edges.push([col, row + 1, col, row])
   }
-  const grid = (half: number, rad: number) => {
-    const rows: [number, number][][] = []
-    for (let j = 0; j <= div; j++) {
-      const y = -half + (2 * half * j) / div
-      const row: [number, number][] = []
-      for (let i = 0; i <= div; i++) {
-        row.push(snapRounded(-half + (2 * half * i) / div, y, half, rad))
-      }
-      rows.push(row)
-    }
-    return rows
+  const next = new Map(edges.map(([a, b, c, d]) => [`${a},${b}`, [c, d] as const]))
+  const start: [number, number] = [edges[0][0], edges[0][1]]
+  const poly: [number, number][] = [start]
+  let cur: readonly [number, number] = start
+  for (let i = 0; i < edges.length; i++) {
+    const step = next.get(`${cur[0]},${cur[1]}`)
+    if (!step || (step[0] === start[0] && step[1] === start[1])) break
+    poly.push([step[0], step[1]])
+    cur = step
   }
-  const top = grid(halfIn, radIn)
-  const topId = top.map((row) => row.map(([x, y]) => add(x, y, size)))
-  for (let j = 0; j < div; j++) {
-    for (let i = 0; i < div; i++) {
-      const a = topId[j][i]
-      const b = topId[j][i + 1]
-      const c = topId[j + 1][i + 1]
-      const d = topId[j + 1][i]
-      indices.push(a, b, c, a, c, d)
-    }
+  const welded: [number, number][] = []
+  for (let i = 0; i < poly.length; i++) {
+    const prev = poly[(i + poly.length - 1) % poly.length]
+    const point = poly[i]
+    const nxt = poly[(i + 1) % poly.length]
+    if ((prev[0] === point[0] && point[0] === nxt[0]) || (prev[1] === point[1] && point[1] === nxt[1])) continue
+    welded.push(point)
   }
-  const ringOf = (half: number, rad: number, z: number) => {
-    const g = grid(half, rad)
-    const ids: number[] = []
-    for (let i = 0; i < div; i++) ids.push(add(g[0][i][0], g[0][i][1], z))
-    for (let j = 0; j < div; j++) ids.push(add(g[j][div][0], g[j][div][1], z))
-    for (let i = div; i > 0; i--) ids.push(add(g[div][i][0], g[div][i][1], z))
-    for (let j = div; j > 0; j--) ids.push(add(g[j][0][0], g[j][0][1], z))
-    return ids
+  const inward = (a: readonly [number, number], b: readonly [number, number]): [number, number] => {
+    const dx = b[0] - a[0]
+    const dy = b[1] - a[1]
+    const len = Math.hypot(dx, dy) || 1
+    return [-dy / len, dx / len]
   }
-  const topRing: number[] = []
-  for (let i = 0; i < div; i++) topRing.push(topId[0][i])
-  for (let j = 0; j < div; j++) topRing.push(topId[j][div])
-  for (let i = div; i > 0; i--) topRing.push(topId[div][i])
-  for (let j = div; j > 0; j--) topRing.push(topId[j][0])
-  const bridge = (upper: number[], lower: number[]) => {
-    for (let i = 0; i < upper.length; i++) {
-      const i1 = (i + 1) % upper.length
-      indices.push(upper[i], lower[i], lower[i1], upper[i], lower[i1], upper[i1])
-    }
-  }
-  const bottom = grid(halfOut, radOut)
-  const bottomId = bottom.map((row) => row.map(([x, y]) => add(x, y, 0)))
-  for (let j = 0; j < div; j++) {
-    for (let i = 0; i < div; i++) {
-      const a = bottomId[j][i]
-      const b = bottomId[j][i + 1]
-      const c = bottomId[j + 1][i + 1]
-      const d = bottomId[j + 1][i]
-      indices.push(a, c, b, a, d, c)
-    }
-  }
-  const bottomRing: number[] = []
-  for (let i = 0; i < div; i++) bottomRing.push(bottomId[0][i])
-  for (let j = 0; j < div; j++) bottomRing.push(bottomId[j][div])
-  for (let i = div; i > 0; i--) bottomRing.push(bottomId[div][i])
-  for (let j = div; j > 0; j--) bottomRing.push(bottomId[j][0])
-  let prev = topRing
-  for (let s = 1; s <= bevelSeg; s++) {
-    const t = s / bevelSeg
-    const k = Math.sin((t * Math.PI) / 2)
-    const ring = ringOf(
-      halfIn + (halfOut - halfIn) * k,
-      radIn + (radOut - radIn) * k,
-      size - bevel * (1 - Math.cos((t * Math.PI) / 2)),
-    )
-    bridge(prev, ring)
-    prev = ring
-  }
-  bridge(prev, bottomRing)
-  const geometry = new THREE.BufferGeometry()
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
-  geometry.setIndex(indices)
-  geometry.computeVertexNormals()
-  return geometry
+  const offset: [number, number][] = welded.map((point, i) => {
+    const prev = welded[(i + welded.length - 1) % welded.length]
+    const nxt = welded[(i + 1) % welded.length]
+    const in1 = inward(prev, point)
+    const in2 = inward(point, nxt)
+    return [point[0] * CELL + (in1[0] + in2[0]) * inset, point[1] * CELL + (in1[1] + in2[1]) * inset]
+  })
+  return filletConvex(offset, radius).map(([x, y]) => [ORIGIN_X + x - home.x, -(ORIGIN_Y + y) - home.y])
 }
+
+function filletConvex(points: [number, number][], radius: number): [number, number][] {
+  const out: [number, number][] = []
+  const segs = 8
+  for (let i = 0; i < points.length; i++) {
+    const prev = points[(i + points.length - 1) % points.length]
+    const point = points[i]
+    const nxt = points[(i + 1) % points.length]
+    const v1x = point[0] - prev[0]
+    const v1y = point[1] - prev[1]
+    const v2x = nxt[0] - point[0]
+    const v2y = nxt[1] - point[1]
+    const cross = v1x * v2y - v1y * v2x
+    const l1 = Math.hypot(v1x, v1y) || 1
+    const l2 = Math.hypot(v2x, v2y) || 1
+    const rad = cross <= 0 ? 0 : Math.min(radius, l1 * 0.45, l2 * 0.45)
+    const a: [number, number] = [point[0] - (v1x / l1) * rad, point[1] - (v1y / l1) * rad]
+    const b: [number, number] = [point[0] + (v2x / l2) * rad, point[1] + (v2y / l2) * rad]
+    const cx = a[0] + b[0] - point[0]
+    const cy = a[1] + b[1] - point[1]
+    const ang0 = Math.atan2(a[1] - cy, a[0] - cx)
+    let sweep = Math.atan2(b[1] - cy, b[0] - cx) - ang0
+    while (sweep > Math.PI) sweep -= Math.PI * 2
+    while (sweep < -Math.PI) sweep += Math.PI * 2
+    for (let s = 0; s <= segs; s++) {
+      const ang = ang0 + sweep * (s / segs)
+      out.push([cx + Math.cos(ang) * rad, cy + Math.sin(ang) * rad])
+    }
+  }
+  return out
+}
+
+

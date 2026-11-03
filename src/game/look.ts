@@ -1,10 +1,42 @@
 /** Settled stage defaults. The settings panel mutates this object. */
 
+/** Visual board. Level occupancy stays on `GRID` in level.ts. */
+export const BOARD_GRID = 5
+export const CELL = 64
+
+export const TRAY_BEVEL = 6
+export const TRAY_BEVEL_SIZE = 5
+export const TRAY_LIP = 12
+export const TRAY_MARGIN = 4
+
+/**
+ * Camera distance that framed a 5×5 plate across the 390-wide stage.
+ * A smaller board uses a shorter distance so that plate's screen margin stays put.
+ */
+export const FRAME_DIST = 1200
+const FRAME_CUBE = 60
+
+export function boardExtent(cubeSize: number): number {
+  return (
+    BOARD_GRID * CELL -
+    (CELL - cubeSize) +
+    TRAY_MARGIN * 2 +
+    TRAY_BEVEL_SIZE * 4 +
+    TRAY_LIP * 2
+  )
+}
+
+export function frameDistance(cubeSize: number): number {
+  const reference =
+    5 * CELL - (CELL - FRAME_CUBE) + TRAY_MARGIN * 2 + TRAY_BEVEL_SIZE * 4 + TRAY_LIP * 2
+  return (FRAME_DIST * boardExtent(cubeSize)) / reference
+}
+
 export const look = {
   topZ: 42,
   pitch: -15,
   yaw: 0,
-  dist: 1200,
+  dist: frameDistance(60),
   key: 0.85,
   keyAz: -30,
   keyEl: 80,
@@ -34,10 +66,6 @@ export const SHADOW_OPACITY = 0.4
 export const SHADOW_Z = -40
 export const FLOOR_TOP = -7
 
-export const TRAY_BEVEL = 6
-export const TRAY_BEVEL_SIZE = 5
-export const TRAY_LIP = 12
-export const TRAY_MARGIN = 4
 export const FLOOR_BEVEL = 6
 export const FLOOR_THICK = 24
 

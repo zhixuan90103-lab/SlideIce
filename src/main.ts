@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { Capacitor } from '@capacitor/core';
-import { look } from './game/look';
+import { FRAME_DIST, frameDistance, look } from './game/look';
 import { mountWoodGame, type WoodGame } from './game/play';
 import {
   DESIGN_HEIGHT,
@@ -48,7 +48,7 @@ function mountLookTune(camera: THREE.PerspectiveCamera, game: WoodGame): void {
     ['辅仰角', 'fillEl', look.fillEl, 5, 85, 1],
     ['俯仰', 'pitch', look.pitch, -70, 70, 1],
     ['偏航', 'yaw', look.yaw, -180, 180, 1],
-    ['距离', 'dist', look.dist, 800, 2200, 20],
+    ['距离', 'dist', look.dist, 400, 2200, 20],
     ['块', 'size', look.size, 30, 90, 1],
     ['圆角', 'corner', look.corner, 2, 24, 1],
     ['棱', 'edge', look.edge, 1, 20, 1],
@@ -91,7 +91,14 @@ function mountLookTune(camera: THREE.PerspectiveCamera, game: WoodGame): void {
     else if (kind === 'pitch') look.pitch = value;
     else if (kind === 'yaw') look.yaw = value;
     else if (kind === 'dist') look.dist = value;
-    else if (kind === 'size') look.size = value;
+    else if (kind === 'size') {
+      look.size = value;
+      look.dist = frameDistance(value);
+      const distInput = panel.querySelector<HTMLInputElement>('input[data-k="dist"]');
+      const distOut = distInput?.parentElement?.querySelector('output');
+      if (distInput) distInput.value = String(look.dist);
+      if (distOut) distOut.textContent = String(Math.round(look.dist));
+    }
     else if (kind === 'corner') look.corner = value;
     else if (kind === 'edge') look.edge = value;
     else if (kind === 'roughness') look.roughness = value;
@@ -112,7 +119,7 @@ function applyCamera(camera: THREE.PerspectiveCamera): void {
   const pitch = THREE.MathUtils.degToRad(look.pitch);
   const yaw = THREE.MathUtils.degToRad(look.yaw);
   const reach = Math.sin(pitch) * look.dist;
-  camera.fov = THREE.MathUtils.radToDeg(2 * Math.atan(DESIGN_HEIGHT / 2 / look.dist));
+  camera.fov = THREE.MathUtils.radToDeg(2 * Math.atan(DESIGN_HEIGHT / 2 / FRAME_DIST));
   camera.aspect = DESIGN_WIDTH / DESIGN_HEIGHT;
   camera.position.set(
     boardMid.x + Math.sin(yaw) * reach,
