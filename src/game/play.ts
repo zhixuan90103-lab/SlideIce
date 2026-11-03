@@ -4,6 +4,7 @@
  *   world y = -design y
  *   camera on +z, looking toward -z, up = +y
  * So row-down is world -y, and 下 slides toward -y.
+ * The ortho shear in main.ts drops the -y face by 4 design pixels.
  * Piece groups stay on their cells. Drag offset and squash live on a child.
  */
 
@@ -54,6 +55,8 @@ type Gesture = {
 export type WoodGame = {
   update(dt: number): void
   dispose(): void
+  /** Extruded height in design pixels. Bottom stays at z = 2. Returns the top z. */
+  setPieceHeight(height: number): number
 }
 
 export function mountWoodGame(
@@ -64,14 +67,17 @@ export function mountWoodGame(
   assertLevel1()
   assertFrame()
 
-  scene.add(new THREE.HemisphereLight(0xfff4e0, 0x3a2a1c, 1.15))
-  const key = new THREE.DirectionalLight(0xfff7ee, 1.25)
-  key.position.set(80, 220, 300)
+  scene.add(new THREE.HemisphereLight(0xfff6e4, 0x4a2e18, 0.72))
+  const key = new THREE.DirectionalLight(0xfff8ee, 2.6)
+  key.position.set(-220, 340, 280)
   scene.add(key)
+  const fill = new THREE.DirectionalLight(0xffe0b0, 0.35)
+  fill.position.set(160, -80, 140)
+  scene.add(fill)
 
   scene.background = new THREE.Color(0x6a3b22)
-  const trayMat = woodMaterial(0x8a5a32, 1.4)
-  const floorMat = woodMaterial(0x6e4428, 1.1)
+  const trayMat = woodMaterial(0x9a6236, 1.6)
+  const floorMat = woodMaterial(0x6a4128, 1.8)
 
   scene.add(makeBackdrop())
   scene.add(makeTray(trayMat))
@@ -157,6 +163,15 @@ export function mountWoodGame(
   stage.addEventListener('pointercancel', onUp)
 
   return {
+    setPieceHeight(height: number): number {
+      const h = Math.max(1, height)
+      for (const view of views.values()) {
+        const mesh = view.visual.children[0] as THREE.Mesh
+        mesh.scale.z = h / MESH_H
+        mesh.position.z = TOP_Z - MESH_H
+      }
+      return TOP_Z - MESH_H + h
+    },
     update(dt) {
       for (const view of views.values()) easeScale(view, dt)
       for (const view of springs) {
@@ -258,13 +273,19 @@ function cellWorld(col: number, row: number): THREE.Vector3 {
 }
 
 const PIECE_TINT: Record<string, number> = {
-  C: 0x3d74d6,
+  C: 0x2f9ed8,
   H: 0xf0b02a,
-  A: 0xf2c14b,
-  P: 0x2f9a4a,
-  B: 0x7d4eb8,
-  M: 0xef7d32,
+  A: 0xf6c843,
+  P: 0x3cb44a,
+  B: 0x8a48c4,
+  M: 0xf08a28,
 }
+
+const MESH_H = 14
+const TOP_Z = 16
+const CORNER_R = 10
+const BEVEL_Z = 5
+const BEVEL_XY = 3.2
 
 function makePiece(def: PieceDef): View {
   const centers = def.cells.map(([col, row]) => cellWorld(col, row))
@@ -276,58 +297,132 @@ function makePiece(def: PieceDef): View {
   const visual = new THREE.Group()
   group.add(visual)
 
-  const occupied = new Set(def.cells.map(([col, row]) => cellKey(col, row)))
-  const has = (col: number, row: number) => occupied.has(cellKey(col, row))
-  const material = woodMaterial(PIECE_TINT[def.id] ?? 0xe0b56a, 0.85)
-  for (const [col, row] of def.cells) {
-    const growL = has(col - 1, row) ? GAP / 2 : 0
-    const growR = has(col + 1, row) ? GAP / 2 : 0
-    const growD = has(col, row + 1) ? GAP / 2 : 0
-    const growU = has(col, row - 1) ? GAP / 2 : 0
-    const box = new THREE.Mesh(
-      new THREE.BoxGeometry(BODY + growL + growR, BODY + growU + growD, 16),
-      material,
-    )
-    const center = cellWorld(col, row)
-    box.position.set(
-      center.x - home.x + (growR - growL) / 2,
-      center.y - home.y + (growU - growD) / 2,
-      8,
-    )
-    visual.add(box)
-  }
-  visual.add(makeArrow(def, home))
+  const mesh = new THREE.Mesh(
+    new THREE.ExtrudeGeometry(pieceShape(def.cells, home), {
+      depth: MESH_H - BEVEL_Z * 2,
+      bevelEnabled: true,
+      bevelThickness: BEVEL_Z,
+      bevelSize: BEVEL_XY,
+      bevelSegments: 8,
+      bevelOffset: 0,
+    }),
+    woodMaterial(PIECE_TINT[def.id] ?? 0xe0b56a, 2.2),
+  )
+  mesh.position.z = TOP_Z - MESH_H
+  visual.add(mesh)
+  const shadowShape = pieceShape(def.cells, home)
+  const shadow = new THREE.Mesh(
+    new THREE.ShapeGeometry(shadowShape),
+    new THREE.MeshBasicMaterial({
+      color: 0x2a140c,
+      transparent: true,
+      opacity: 0.28,
+      depthWrite: false,
+    }),
+  )
+  shadow.position.set(1.5, -6, 0.3)
+  visual.add(shadow)
   return { def, group, visual, home }
 }
 
-function makeArrow(def: PieceDef, home: THREE.Vector3): THREE.Mesh {
-  const [dc, dr] = DIR_STEP[def.dir]
-  const front = extreme(def.cells, dc, dr)
-  const at = new THREE.Vector3()
-  let n = 0
-  for (const [col, row] of def.cells) {
-    if (!front.has(cellKey(col, row))) continue
-    at.add(cellWorld(col, row))
-    n += 1
+/** Union of the cells, inset by half the gap, convex corners filleted. Local XY, y up. */
+function pieceShape(cells: readonly (readonly [number, number])[], home: THREE.Vector3): THREE.Shape {
+  const set = new Set(cells.map(([c, r]) => cellKey(c, r)))
+  const has = (c: number, r: number) => set.has(cellKey(c, r))
+  const edges: [number, number, number, number][] = []
+  for (const [c, r] of cells) {
+    if (!has(c, r - 1)) edges.push([c, r, c + 1, r])
+    if (!has(c + 1, r)) edges.push([c + 1, r, c + 1, r + 1])
+    if (!has(c, r + 1)) edges.push([c + 1, r + 1, c, r + 1])
+    if (!has(c - 1, r)) edges.push([c, r + 1, c, r])
   }
-  at.multiplyScalar(1 / n)
-  at.x += dc * CELL * 0.28
-  at.y += -dr * CELL * 0.28
-  const arrow = new THREE.Mesh(
-    new THREE.ConeGeometry(7, 12, 3),
-    new THREE.MeshStandardMaterial({ color: 0xfff6e8, roughness: 0.45 }),
-  )
-  arrow.position.set(at.x - home.x, at.y - home.y, 18)
-  arrow.rotation.z = Math.atan2(-dr, dc) - Math.PI / 2
-  return arrow
+  const key = (c: number, r: number) => `${c},${r}`
+  const next = new Map(edges.map(([a, b, c, d]) => [key(a, b), [c, d] as const]))
+  const start = [edges[0][0], edges[0][1]] as const
+  const poly: [number, number][] = [[start[0], start[1]]]
+  let cur: readonly [number, number] = start
+  for (let i = 0; i < edges.length; i++) {
+    const n = next.get(key(cur[0], cur[1]))
+    if (!n) break
+    if (n[0] === start[0] && n[1] === start[1]) break
+    poly.push([n[0], n[1]])
+    cur = n
+  }
+  const welded: [number, number][] = []
+  for (let i = 0; i < poly.length; i++) {
+    const prev = poly[(i + poly.length - 1) % poly.length]
+    const p = poly[i]
+    const nxt = poly[(i + 1) % poly.length]
+    if ((prev[0] === p[0] && p[0] === nxt[0]) || (prev[1] === p[1] && p[1] === nxt[1])) continue
+    welded.push(p)
+  }
+  const inset = GAP / 2 + BEVEL_XY
+  const offset: [number, number][] = welded.map((p, i) => {
+    const prev = welded[(i + welded.length - 1) % welded.length]
+    const nxt = welded[(i + 1) % welded.length]
+    const in1 = inward(prev, p)
+    const in2 = inward(p, nxt)
+    return [p[0] * CELL + (in1[0] + in2[0]) * inset, p[1] * CELL + (in1[1] + in2[1]) * inset]
+  })
+  const filleted = filletConvex(offset, CORNER_R)
+  const shape = new THREE.Shape()
+  filleted.forEach(([x, y], i) => {
+    const lx = ORIGIN_X + x - home.x
+    const ly = -(ORIGIN_Y + y) - home.y
+    if (i === 0) shape.moveTo(lx, ly)
+    else shape.lineTo(lx, ly)
+  })
+  shape.closePath()
+  return shape
+}
+
+function inward(a: readonly [number, number], b: readonly [number, number]): [number, number] {
+  const dx = b[0] - a[0]
+  const dy = b[1] - a[1]
+  const len = Math.hypot(dx, dy) || 1
+  return [-dy / len, dx / len]
+}
+
+function filletConvex(points: [number, number][], radius: number): [number, number][] {
+  const out: [number, number][] = []
+  const segs = 10
+  for (let i = 0; i < points.length; i++) {
+    const prev = points[(i + points.length - 1) % points.length]
+    const p = points[i]
+    const nxt = points[(i + 1) % points.length]
+    const v1x = p[0] - prev[0]
+    const v1y = p[1] - prev[1]
+    const v2x = nxt[0] - p[0]
+    const v2y = nxt[1] - p[1]
+    const cross = v1x * v2y - v1y * v2x
+    if (cross <= 0) {
+      out.push(p)
+      continue
+    }
+    const l1 = Math.hypot(v1x, v1y) || 1
+    const l2 = Math.hypot(v2x, v2y) || 1
+    const a: [number, number] = [p[0] - (v1x / l1) * radius, p[1] - (v1y / l1) * radius]
+    const b: [number, number] = [p[0] + (v2x / l2) * radius, p[1] + (v2y / l2) * radius]
+    const cx = a[0] + b[0] - p[0]
+    const cy = a[1] + b[1] - p[1]
+    const ang0 = Math.atan2(a[1] - cy, a[0] - cx)
+    let d = Math.atan2(b[1] - cy, b[0] - cx) - ang0
+    while (d > Math.PI) d -= Math.PI * 2
+    while (d < -Math.PI) d += Math.PI * 2
+    for (let s = 0; s <= segs; s++) {
+      const ang = ang0 + d * (s / segs)
+      out.push([cx + Math.cos(ang) * radius, cy + Math.sin(ang) * radius])
+    }
+  }
+  return out
 }
 
 function woodMaterial(tint: number, repeat: number): THREE.MeshStandardMaterial {
   return new THREE.MeshStandardMaterial({
     color: tint,
     map: woodMap(repeat),
-    roughness: 0.62,
-    metalness: 0.02,
+    roughness: 0.58,
+    metalness: 0,
   })
 }
 
@@ -337,15 +432,15 @@ function woodMap(repeat: number): THREE.CanvasTexture {
   canvas.height = 256
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('no 2d context')
-  ctx.fillStyle = '#f3d7a2'
+  ctx.fillStyle = '#f3d7a4'
   ctx.fillRect(0, 0, 128, 256)
-  for (let i = 0; i < 48; i++) {
-    const x = Math.random() * 128
-    ctx.strokeStyle = `rgba(90, 52, 18, ${0.08 + Math.random() * 0.14})`
-    ctx.lineWidth = 1 + Math.random() * 2
+  for (let i = 0; i < 22; i++) {
+    const x = (i * 6) % 128
+    ctx.strokeStyle = `rgba(74, 40, 14, ${0.12 + (i % 4) * 0.05})`
+    ctx.lineWidth = i % 3 === 0 ? 2.4 : 1.1
     ctx.beginPath()
     ctx.moveTo(x, 0)
-    ctx.bezierCurveTo(x + 12, 70, x - 10, 150, x + 6, 256)
+    ctx.bezierCurveTo(x + 8, 70, x - 6, 150, x + 2, 256)
     ctx.stroke()
   }
   const map = new THREE.CanvasTexture(canvas)
@@ -365,37 +460,39 @@ function makeBackdrop(): THREE.Mesh {
   return mesh
 }
 
-/** Front cells: maximum of col*dc + row*dr. 左 is dc=-1, so the max is the leftmost column. */
-function extreme(cells: readonly (readonly [number, number])[], dc: number, dr: number): Set<string> {
-  let best = -Infinity
-  for (const [col, row] of cells) best = Math.max(best, col * dc + row * dr)
-  const out = new Set<string>()
-  for (const [col, row] of cells) {
-    if (col * dc + row * dr === best) out.add(cellKey(col, row))
-  }
-  return out
+function roundLoop(path: THREE.Path | THREE.Shape, x: number, y: number, w: number, h: number, r: number): void {
+  path.moveTo(x + r, y)
+  path.lineTo(x + w - r, y)
+  path.absarc(x + w - r, y + r, r, -Math.PI / 2, 0, false)
+  path.lineTo(x + w, y + h - r)
+  path.absarc(x + w - r, y + h - r, r, 0, Math.PI / 2, false)
+  path.lineTo(x + r, y + h)
+  path.absarc(x + r, y + h - r, r, Math.PI / 2, Math.PI, false)
+  path.lineTo(x, y + r)
+  path.absarc(x + r, y + r, r, Math.PI, Math.PI * 1.5, false)
 }
 
 function makeTray(material: THREE.Material): THREE.Mesh {
   const lip = 28
   const outer = BOARD + lip * 2
-  const hole = new THREE.Path()
-  hole.moveTo(-BOARD / 2, -BOARD / 2)
-  hole.lineTo(-BOARD / 2, BOARD / 2)
-  hole.lineTo(BOARD / 2, BOARD / 2)
-  hole.lineTo(BOARD / 2, -BOARD / 2)
-  hole.closePath()
   const frame = new THREE.Shape()
-  frame.moveTo(-outer / 2, -outer / 2)
-  frame.lineTo(outer / 2, -outer / 2)
-  frame.lineTo(outer / 2, outer / 2)
-  frame.lineTo(-outer / 2, outer / 2)
-  frame.closePath()
+  roundLoop(frame, -outer / 2, -outer / 2, outer, outer, 26)
+  const hole = new THREE.Path()
+  roundLoop(hole, -BOARD / 2, -BOARD / 2, BOARD, BOARD, 18)
   frame.holes.push(hole)
-  const mesh = new THREE.Mesh(new THREE.ExtrudeGeometry(frame, { depth: 16, bevelEnabled: false }), material)
+  const mesh = new THREE.Mesh(
+    new THREE.ExtrudeGeometry(frame, {
+      depth: 8,
+      bevelEnabled: true,
+      bevelThickness: 2.2,
+      bevelSize: 2.2,
+      bevelSegments: 4,
+    }),
+    material,
+  )
   const cx = ORIGIN_X + BOARD / 2
   const cy = -(ORIGIN_Y + BOARD / 2)
-  mesh.position.set(cx, cy, -10)
+  mesh.position.set(cx, cy, -12)
   return mesh
 }
 
@@ -408,9 +505,9 @@ function makeFloor(material: THREE.Material): THREE.Mesh {
 function makeWall(material: THREE.Material): THREE.Group {
   const group = new THREE.Group()
   for (let row = 0; row < GRID; row++) {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(BODY, BODY, 16), material)
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(BODY, BODY, 12), material)
     mesh.position.copy(cellWorld(GRID - 1, row))
-    mesh.position.z = -2
+    mesh.position.z = -6
     group.add(mesh)
   }
   return group
