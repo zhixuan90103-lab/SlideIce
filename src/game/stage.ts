@@ -236,19 +236,14 @@ function traySpans(size: number, corner: number, edge: number) {
     outer,
     holeRadius,
     outerRadius: holeRadius + TRAY_LIP,
-    floorSpan: outer - TRAY_BEVEL_SIZE * 2,
-    floorRadius: Math.max(corner, edge) + TRAY_MARGIN + TRAY_LIP,
   }
 }
 
 function trayGeometry(size: number, corner: number, edge: number): THREE.ExtrudeGeometry {
   const span = traySpans(size, corner, edge)
-  const frame = new THREE.Shape()
-  roundLoop(frame, -span.outer / 2, -span.outer / 2, span.outer, span.outer, span.outerRadius)
-  const hole = new THREE.Path()
-  roundLoop(hole, -span.hole / 2, -span.hole / 2, span.hole, span.hole, span.holeRadius)
-  frame.holes.push(hole)
-  return new THREE.ExtrudeGeometry(frame, {
+  const bar = new THREE.Shape()
+  roundLoop(bar, -span.outer / 2, -span.outer / 2, TRAY_LIP, span.outer, Math.min(span.outerRadius, TRAY_LIP / 2))
+  return new THREE.ExtrudeGeometry(bar, {
     depth: Math.max(1, size - TRAY_BEVEL),
     bevelEnabled: true,
     bevelThickness: TRAY_BEVEL,
@@ -257,15 +252,20 @@ function trayGeometry(size: number, corner: number, edge: number): THREE.Extrude
   })
 }
 
+const FLOOR_BEVEL_SIZE = 2
+
 function floorGeometry(size: number, corner: number, edge: number): THREE.ExtrudeGeometry {
   const span = traySpans(size, corner, edge)
+  const wallLength = span.outer + TRAY_BEVEL_SIZE * 2
+  const side = wallLength - FLOOR_BEVEL_SIZE * 2
   const shape = new THREE.Shape()
-  roundLoop(shape, -span.floorSpan / 2, -span.floorSpan / 2, span.floorSpan, span.floorSpan, span.floorRadius)
+  const radius = Math.min(side / 2 - 1, span.outerRadius + TRAY_BEVEL_SIZE - FLOOR_BEVEL_SIZE)
+  roundLoop(shape, -side / 2, -side / 2, side, side, radius)
   return new THREE.ExtrudeGeometry(shape, {
     depth: FLOOR_THICK - FLOOR_BEVEL * 2,
     bevelEnabled: true,
     bevelThickness: FLOOR_BEVEL,
-    bevelSize: 2,
+    bevelSize: FLOOR_BEVEL_SIZE,
     bevelSegments: 6,
   })
 }
