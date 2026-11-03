@@ -26,6 +26,7 @@
 | 构建 | `vite.config.ts`（**`base: './'`**） |
 | iOS 注入 | `scripts/bootstrap-ios.mjs` |
 | 玩法方案 | `docs/GAME.md` |
+| 舞台造型 | `docs/STAGE.md` |
 | 音效方案（未实现） | `docs/AUDIO.md` |
 
 ## DOM（勿拆）

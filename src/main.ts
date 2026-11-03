@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { Capacitor } from '@capacitor/core';
+import { look } from './game/look';
 import { mountWoodGame, type WoodGame } from './game/play';
 import {
   DESIGN_HEIGHT,
@@ -21,25 +22,6 @@ import {
 } from './adapt/devicePreview';
 import { applyNativeClass, applySafeAreaCssVars } from './adapt/safeArea';
 import { createRenderer, resizeToDesign } from './create-renderer';
-
-/** Distance from the board. Farther means a milder perspective. */
-const look = {
-  topZ: 42,
-  pitch: -15,
-  yaw: 0,
-  dist: 1200,
-  key: 0.85,
-  keyAz: -30,
-  keyEl: 80,
-  fill: 0.28,
-  fillAz: -101,
-  fillEl: 57,
-  ambient: 1.55,
-  size: 60,
-  corner: 5,
-  edge: 8,
-  roughness: 0.42,
-};
 
 function mountLookTune(camera: THREE.PerspectiveCamera, game: WoodGame): void {
   const root = document.getElementById('ui-root');
