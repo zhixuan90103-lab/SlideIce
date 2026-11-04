@@ -2,14 +2,15 @@
  * Screen frame, one source:
  *   world x = design x
  *   world y = -design y
- * Pieces on the stage follow the finger in that plane.
- * A press lifts the piece. The pressed point follows the finger.
+ * A press lifts the piece at once. The piece stays put inside the design-space dead zone,
+ * then moves on the one locked axis.
  * Release removes a piece that can finish leaving, and lands every other piece on cells.
  */
 
 import * as THREE from 'three'
 import { DESIGN_HEIGHT, DESIGN_WIDTH, type StageLayout } from '../adapt/design'
 import { mountHint } from './hint'
+import { beginRecoil, stepRecoil, wobbleOffset, type Recoil } from './recoil'
 import { freshPraise, notePraiseClear, showPraise } from './praise'
 import { SHATTER, disposeShatter, makeShatter, stepShatters, type Shatter } from './shatter'
 import {
@@ -20,11 +21,9 @@ import {
   releaseFinger,
   rememberFinger,
   seedFinger,
-  seedGrab,
   type AxisLock,
   type Finger,
   type FingerSample,
-  type Grab,
 } from './slide'
 import { mountStage, type StagePiece } from './stage'
 
@@ -32,14 +31,25 @@ type Gesture = {
   id: number
   piece: StagePiece
   finger: Finger
-  grab: Grab
   pressX: number
   pressY: number
+  originX: number
+  originY: number
   samples: FingerSample[]
   trend: AxisLock | null
+  /** Still pressed into the piece that stopped this drag. One wobble per contact. */
+  bumping: boolean
 }
 
-type Landing = { piece: StagePiece; x: number; y: number; leave: boolean; speed: number }
+type Landing = {
+  piece: StagePiece
+  x: number
+  y: number
+  leave: boolean
+  speed: number
+  /** Slide that stops on another piece. The wobble plays once, on arrival. */
+  bump: { axis: 'x' | 'y'; sign: number } | null
+}
 
 const LAND_SPEED = 900
 
@@ -82,6 +92,7 @@ export function mountSlideGame(
   const maskRestore: THREE.Material[] = []
   let gesture: Gesture | null = null
   let landing: Landing | null = null
+  const recoils = new Map<StagePiece, Recoil>()
   let ended = false
   let held: StagePiece | null = null
   const shatters: Shatter[] = []
@@ -111,22 +122,30 @@ export function mountSlideGame(
     if (pieces.every((item) => !item.alive)) ended = true
   }
 
+  const bump = (piece: StagePiece, axis: 'x' | 'y', sign: number) => {
+    const next = beginRecoil(axis, sign)
+    if (next) recoils.set(piece, next)
+  }
+
   const release = (piece: StagePiece) => {
     const plan = planRelease(piece, pieces, gesture?.trend ?? null, gesture?.samples ?? [])
+    const trend = gesture?.trend ?? null
     if (gesture) releaseFinger(gesture.samples)
     gesture = null
     held = null
-    piece.mesh.position.x = 0
-    piece.mesh.position.y = 0
     if (plan.kind === 'eliminate') {
+      recoils.delete(piece)
+      piece.mesh.position.x = 0
+      piece.mesh.position.y = 0
       eliminate(piece)
       return
     }
     if (plan.kind === 'slide') {
-      landing = { piece, x: plan.x, y: plan.y, leave: plan.clear, speed: plan.speed }
+      const hit = !plan.clear && trend ? { axis: trend.axis, sign: trend.sign } : null
+      landing = { piece, x: plan.x, y: plan.y, leave: plan.clear, speed: plan.speed, bump: hit }
       return
     }
-    landing = { piece, ...gridSnap(piece, pieces), leave: false, speed: LAND_SPEED }
+    landing = { piece, ...gridSnap(piece, pieces), leave: false, speed: LAND_SPEED, bump: null }
   }
 
   const onDown = (event: PointerEvent) => {
@@ -147,11 +166,13 @@ export function mountSlideGame(
       id: event.pointerId,
       piece: hit,
       finger: seedFinger(point.x, point.y),
-      grab: seedGrab(point.x, point.y, hit.anchor.position.x, hit.anchor.position.y),
       pressX: point.x,
       pressY: point.y,
+      originX: hit.anchor.position.x,
+      originY: hit.anchor.position.y,
       samples: [],
       trend: null,
+      bumping: false,
     }
     rememberFinger(gesture.samples, event.timeStamp / 1000, point.x, point.y)
   }
@@ -199,17 +220,23 @@ export function mountSlideGame(
     },
     update(dt) {
       if (gesture) {
-        const fast = followHold(
+        const moved = followHold(
           gesture.piece,
           pieces,
           gesture.finger,
-          gesture.grab,
           gesture.pressX,
           gesture.pressY,
+          gesture.originX,
+          gesture.originY,
           gesture.samples,
-          performance.now() / 1000,
+          gesture.trend,
         )
-        if (fast) gesture.trend = fast
+        if (moved.axis) gesture.trend = moved.axis
+        if (moved.blocked && !gesture.bumping && moved.axis) {
+          bump(gesture.piece, moved.axis.axis, moved.axis.sign)
+          gesture.bumping = true
+        }
+        if (!moved.blocked) gesture.bumping = false
       }
       if (landing && landing.piece !== held && landing.piece.alive) {
         const dx = landing.x - landing.piece.anchor.position.x
@@ -221,11 +248,12 @@ export function mountSlideGame(
           landing.piece.anchor.position.y = landing.y
           const done = landing
           landing = null
+          if (done.bump) bump(done.piece, done.bump.axis, done.bump.sign)
           if (done.leave) eliminate(done.piece)
           else {
             const home = gridSnap(done.piece, pieces)
             if (Math.hypot(home.x - done.piece.anchor.position.x, home.y - done.piece.anchor.position.y) > 0.01) {
-              landing = { piece: done.piece, ...home, leave: false, speed: LAND_SPEED }
+              landing = { piece: done.piece, ...home, leave: false, speed: LAND_SPEED, bump: null }
             }
           }
         } else {
@@ -239,7 +267,18 @@ export function mountSlideGame(
         if (plan.kind === 'eliminate' || (plan.kind === 'slide' && plan.clear)) hintTargets.push(held.mesh)
       }
       hint.set(hintTargets)
-    hint.step(dt)
+      hint.step(dt)
+      for (const [piece, recoil] of recoils) {
+        if (!piece.alive || stepRecoil(recoil, dt)) {
+          piece.mesh.position.x = 0
+          piece.mesh.position.y = 0
+          recoils.delete(piece)
+          continue
+        }
+        const offset = wobbleOffset(recoil)
+        piece.mesh.position.x = recoil.axis === 'x' ? offset : 0
+        piece.mesh.position.y = recoil.axis === 'y' ? offset : 0
+      }
     stepShatters(shatters, -DESIGN_HEIGHT - SHATTER.chip, dt)
       for (let i = shatters.length - 1; i >= 0; i--) {
         if (!shatters[i].dead) continue

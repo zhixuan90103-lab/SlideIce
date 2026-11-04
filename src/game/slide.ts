@@ -1,36 +1,27 @@
 /**
- * Finger follow. The pressed point tracks a smoothed finger.
- * The piece follows the straight segments between finger samples, a short time behind the latest sample.
- * A fast swipe locks one axis for the latest segment. Collision stops at the first contact and does not tunnel.
+ * One-axis drag in design space.
+ * world x = design x, world y = -design y.
+ * A press selects without moving. Past the dead zone, the longer axis locks until release.
+ * Travel on that axis drops the dead zone once, so the piece does not jump. Collision stops at first contact.
  */
 
 import { CELL } from './look'
 import { boardRect, nearestCellCenter, type StagePiece } from './stage'
 
-/** How far the followed point stays behind the latest finger sample, so a segment can be drawn. */
-const LINE_DELAY = 0.02
-/** At FAST_SPEED the stroke must reach FAST_MIN. Faster swipes need less distance, down to FAST_FLOOR. */
+/** Design-space radius. Inside it the selected piece does not move. */
+export const DRAG_DEAD = 8
+/** The longer axis must beat the other by this much before it locks. */
+const AXIS_RATIO = 1.5
+/** Release still slides out only while the recent window is at least this fast. */
 export const FAST_SPEED = 900
 export const FAST_WINDOW = 0.08
-export const FAST_SPAN = 0.05
-export const FAST_MIN = 28
-const FAST_FLOOR = 8
-/** Share of the stroke that must point along an open exit before that exit wins. */
-const TREND = 0.6
 
 export type Finger = { x: number; y: number }
-
-/** Design finger minus the piece. Keeps the pressed point on the finger. */
-export type Grab = { x: number; y: number }
 
 export type FingerSample = { t: number; x: number; y: number }
 
 export function seedFinger(x: number, y: number): Finger {
   return { x, y }
-}
-
-export function seedGrab(fingerX: number, fingerY: number, pieceX: number, pieceY: number): Grab {
-  return { x: fingerX - pieceX, y: fingerY + pieceY }
 }
 
 const samplePool: FingerSample[] = []
@@ -68,53 +59,8 @@ export function releaseFinger(samples: FingerSample[]): void {
   samples.length = 0
 }
 
-const grabStep = { x: 0, y: 0 }
-
-/**
- * World step from the grab. The returned object is reused on the next call.
- * A fast axis rebases the other axis onto the piece first, so that sample's cross motion is dropped.
- */
-export function grabDelta(
-  grab: Grab,
-  finger: Finger,
-  pieceX: number,
-  pieceY: number,
-  axis: 'x' | 'y' | null,
-): { x: number; y: number } {
-  if (axis === 'x') grab.y = pieceY + finger.y
-  if (axis === 'y') grab.x = finger.x - pieceX
-  grabStep.x = finger.x - grab.x - pieceX
-  grabStep.y = -finger.y + grab.y - pieceY
-  return grabStep
-}
-
-const lineAt = { x: 0, y: 0 }
-
-/** Linear point on the finger polyline, LINE_DELAY behind `now`. The object is reused. */
-export function fingerOnLine(samples: readonly FingerSample[], now: number): { x: number; y: number } {
-  const first = samples[0]
-  const last = samples[samples.length - 1]
-  if (!first || !last) return lineAt
-  const time = Math.min(last.t, Math.max(first.t, now - LINE_DELAY))
-  if (time <= first.t) {
-    lineAt.x = first.x
-    lineAt.y = first.y
-    return lineAt
-  }
-  let index = 1
-  while (index < samples.length - 1 && samples[index].t < time) index += 1
-  const left = samples[index - 1]
-  const right = samples[index]
-  const span = right.t - left.t
-  const amount = span <= 0 ? 1 : (time - left.t) / span
-  lineAt.x = left.x + (right.x - left.x) * amount
-  lineAt.y = left.y + (right.y - left.y) * amount
-  return lineAt
-}
-
 const othersScratch: StagePiece[] = []
 const axisMove = { moved: 0, blocked: false }
-const axisApproach = { moved: 0, blocked: false }
 
 /** Alive pieces except the one being moved. The array is reused on the next call. */
 function aliveOthers(pieces: readonly StagePiece[], piece: StagePiece): readonly StagePiece[] {
@@ -126,71 +72,71 @@ function aliveOthers(pieces: readonly StagePiece[], piece: StagePiece): readonly
   return othersScratch
 }
 
-/** Move the held piece onto the finger line, then along one axis while the line is still a fast swipe. */
+export type AxisLock = { axis: 'x' | 'y'; sign: number }
+
+/**
+ * Axis from the press point. Design +x is world +x. Design +y (down) is world -y.
+ * Null while the point is inside the dead zone or still too diagonal.
+ */
+export function lockAxis(designDx: number, worldDy: number): AxisLock | null {
+  const ax = Math.abs(designDx)
+  const ay = Math.abs(worldDy)
+  if (Math.hypot(ax, ay) < DRAG_DEAD) return null
+  if (ax >= ay * AXIS_RATIO) return { axis: 'x', sign: Math.sign(designDx) || 1 }
+  if (ay >= ax * AXIS_RATIO) return { axis: 'y', sign: Math.sign(worldDy) || 1 }
+  return null
+}
+
+/** Distance past the dead zone. Inside it, travel is 0. */
+function axisTravel(delta: number): number {
+  const sign = Math.sign(delta)
+  if (sign === 0 || Math.abs(delta) <= DRAG_DEAD) return 0
+  return delta - sign * DRAG_DEAD
+}
+
+export type HoldMove = { axis: AxisLock | null; blocked: boolean }
+
+/**
+ * Hold the press pose until one axis locks. Then slide only on that axis, from the press pose,
+ * with the dead zone removed. A blocked step stops at the contact.
+ * `blocked` is true only when this step tried to travel and another piece stopped it.
+ */
 export function followHold(
   piece: StagePiece,
   pieces: readonly StagePiece[],
   finger: Finger,
-  grab: Grab,
   pressX: number,
   pressY: number,
+  originX: number,
+  originY: number,
   samples: readonly FingerSample[],
-  now: number,
-): AxisLock | null {
-  const fast = fastAxis(piece, pieces, pressX, pressY, samples)
-  const at = fingerOnLine(samples, now)
-  if (samples.length === 0 || (at.x === finger.x && at.y === finger.y)) return fast
-  finger.x = at.x
-  finger.y = at.y
-  const step = grabDelta(grab, finger, piece.anchor.position.x, piece.anchor.position.y, fast?.axis ?? null)
-  followFinger(piece, step.x, step.y, pieces)
-  return fast
-}
-
-export function followFinger(piece: StagePiece, dx: number, dy: number, pieces: readonly StagePiece[]): void {
-  if (dx === 0 && dy === 0) return
-  const others = aliveOthers(pieces, piece)
-  const horizontal = Math.abs(dx) >= Math.abs(dy)
-  const primaryAxis = horizontal ? 'x' : 'y'
-  const secondaryAxis = horizontal ? 'y' : 'x'
-  const primaryAmount = horizontal ? dx : dy
-  const secondaryAmount = horizontal ? dy : dx
-  moveAxis(piece, primaryAxis, primaryAmount, others, axisMove)
-  if (!axisMove.blocked) {
-    moveAxis(piece, secondaryAxis, secondaryAmount, others, axisApproach)
-    return
-  }
-  const fraction = primaryAmount === 0 ? 0 : axisMove.moved / primaryAmount
-  const approach = secondaryAmount * fraction
-  moveAxis(piece, secondaryAxis, approach, others, axisApproach)
-  const remain = secondaryAmount - approach
-  if (axisApproach.blocked || remain === 0) return
-  moveAxis(piece, secondaryAxis, remain, others, axisApproach)
-}
-
-export type AxisLock = { axis: 'x' | 'y'; sign: number }
-
-/**
- * One axis while the recent window is still a fast swipe that has travelled FAST_MIN from the press.
- * The axis comes from that window, not from the whole stroke. Null returns both axes to the grab.
- */
-export function fastAxis(
-  piece: StagePiece,
-  pieces: readonly StagePiece[],
-  pressX: number,
-  pressY: number,
-  samples: readonly FingerSample[],
-): AxisLock | null {
-  const first = samples[0]
+  trend: AxisLock | null,
+): HoldMove {
   const last = samples[samples.length - 1]
-  if (!first || !last || first === last) return null
-  const span = last.t - first.t
-  const recent = Math.hypot(last.x - first.x, last.y - first.y)
-  const stroke = Math.hypot(last.x - pressX, last.y - pressY)
-  const speed = span > 0 ? recent / span : 0
-  const need = Math.max(FAST_FLOOR, FAST_MIN * (FAST_SPEED / Math.max(speed, 1)))
-  if (span < FAST_SPAN || speed < FAST_SPEED || stroke < need) return null
-  return chooseFastAxis(piece, last.x - first.x, -(last.y - first.y), pieces)
+  if (!last) return { axis: trend, blocked: false }
+  finger.x = last.x
+  finger.y = last.y
+  const dx = last.x - pressX
+  const dy = -(last.y - pressY)
+  let axis = trend
+  if (!axis) {
+    axis = lockAxis(dx, dy)
+    if (!axis) return { axis: null, blocked: false }
+  } else {
+    const delta = axis.axis === 'x' ? dx : dy
+    if (Math.abs(delta) > DRAG_DEAD) axis = { axis: axis.axis, sign: Math.sign(delta) || axis.sign }
+  }
+  const travel = axis.axis === 'x' ? axisTravel(dx) : axisTravel(dy)
+  const goalX = axis.axis === 'x' ? originX + travel : originX
+  const goalY = axis.axis === 'y' ? originY + travel : originY
+  const others = aliveOthers(pieces, piece)
+  const pushX = goalX - piece.anchor.position.x
+  const pushY = goalY - piece.anchor.position.y
+  moveAxis(piece, 'x', pushX, others, axisMove)
+  const hitX = axisMove.blocked && pushX !== 0
+  moveAxis(piece, 'y', pushY, others, axisMove)
+  const hitY = axisMove.blocked && pushY !== 0
+  return { axis, blocked: hitX || hitY }
 }
 
 /** Speed of the samples still in the recent window. */
@@ -224,25 +170,6 @@ export function planRelease(
   const dist = Math.hypot(slide.x - piece.anchor.position.x, slide.y - piece.anchor.position.y)
   if (dist <= 0.01) return { kind: 'snap' }
   return { kind: 'slide', x: slide.x, y: slide.y, clear: slide.clear, speed }
-}
-
-/** Longer axis of this segment, unless the segment trends along an open exit. */
-export function chooseFastAxis(piece: StagePiece, strokeX: number, strokeY: number, pieces: readonly StagePiece[]): AxisLock {
-  const longer: AxisLock =
-    Math.abs(strokeX) >= Math.abs(strokeY) ? { axis: 'x', sign: Math.sign(strokeX) || 1 } : { axis: 'y', sign: Math.sign(strokeY) || 1 }
-  const length = Math.hypot(strokeX, strokeY)
-  if (length === 0) return longer
-  let best: AxisLock | null = null
-  let bestAlong = 0
-  for (const candidate of unlockAxes(piece, pieces)) {
-    const along = candidate.axis === 'x' ? strokeX * candidate.sign : strokeY * candidate.sign
-    if (along > bestAlong) {
-      bestAlong = along
-      best = candidate
-    }
-  }
-  if (best && bestAlong >= length * TREND) return best
-  return longer
 }
 
 /**
@@ -317,21 +244,6 @@ const unlockWays: AxisLock[] = [
   { axis: 'y', sign: 1 },
   { axis: 'y', sign: -1 },
 ]
-const unlockFound: AxisLock[] = []
-
-function unlockAxes(piece: StagePiece, pieces: readonly StagePiece[]): readonly AxisLock[] {
-  const others = aliveOthers(pieces, piece)
-  unlockFound.length = 0
-  for (const candidate of unlockWays) {
-    const ox = piece.anchor.position.x
-    const oy = piece.anchor.position.y
-    const dist = exitDistance(piece, ox, oy, candidate)
-    const dx = candidate.axis === 'x' ? candidate.sign * dist : 0
-    const dy = candidate.axis === 'y' ? candidate.sign * dist : 0
-    if (dist <= 0.01 || sweepStop(piece, ox, oy, dx, dy, others) >= 1) unlockFound.push(candidate)
-  }
-  return unlockFound
-}
 
 function moveAxis(
   piece: StagePiece,
