@@ -164,6 +164,51 @@ export function pieceAhead(
   return hit
 }
 
+function alongScore(piece: StagePiece, side: AxisLock): number {
+  const value = side.axis === 'x' ? piece.anchor.position.x : piece.anchor.position.y
+  return value * side.sign
+}
+
+/**
+ * Piece that should replace the held one.
+ * Still on the held piece: only the piece directly ahead, once the finger touches it.
+ * Finger has left the held piece and rests on another: that piece, even when the sweep missed it.
+ */
+export function replacementTarget(
+  current: StagePiece | null,
+  pieces: readonly StagePiece[],
+  trend: AxisLock | null,
+  x: number,
+  y: number,
+  skip: StagePiece | null,
+): StagePiece | null {
+  const hits: StagePiece[] = []
+  for (const piece of pieces) {
+    if (!piece.alive || piece === skip) continue
+    if (coversPiece(piece, x, y)) hits.push(piece)
+  }
+  if (current && hits.includes(current)) {
+    if (!trend) return null
+    const ahead = pieceAhead(current, pieces, trend)
+    if (ahead && ahead !== skip && hits.includes(ahead)) return ahead
+    return null
+  }
+  const others = hits.filter((piece) => piece !== current)
+  if (others.length === 0) return null
+  if (!trend || others.length === 1) return others[0] ?? null
+  let best = others[0]
+  if (!best) return null
+  let score = alongScore(best, trend)
+  for (const piece of others) {
+    const value = alongScore(piece, trend)
+    if (value > score) {
+      best = piece
+      score = value
+    }
+  }
+  return best ?? null
+}
+
 /** Distance past the dead zone. Inside it, travel is 0. */
 function axisTravel(delta: number, dead: number): number {
   const sign = Math.sign(delta)

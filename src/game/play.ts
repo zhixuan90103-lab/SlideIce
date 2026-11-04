@@ -16,8 +16,8 @@ import { SHATTER, disposeShatter, makeShatter, stepShatters, type Shatter } from
 import {
   HOME_BAND,
   followHold,
-  pieceAhead,
   recentAxis,
+  replacementTarget,
   gridSnap,
   planRelease,
   coversPiece,
@@ -294,28 +294,29 @@ export function mountSlideGame(
               : piece.anchor.position.y - gesture.originY
           if (turned && (Math.abs(along) <= HOME_BAND || moved.blocked)) turnAxis(piece, turned)
         }
-        const ahead = piece && gesture.trend ? pieceAhead(piece, pieces, gesture.trend) : null
-        const onAhead =
-          !!ahead &&
-          ahead !== landing?.piece &&
-          !coversPiece(piece!, gesture.finger.x, gesture.finger.y) &&
-          coversPiece(ahead, gesture.finger.x, gesture.finger.y)
-        if (piece && onAhead && ahead) {
+        const next = replacementTarget(
+          piece,
+          pieces,
+          gesture.trend,
+          gesture.finger.x,
+          gesture.finger.y,
+          landing?.piece ?? null,
+        )
+        if (piece && next && next !== piece) {
           const dropped = piece
           const force = gesture.trend
           gesture.piece = null
           held = null
           sit(dropped, force)
-          takePiece(ahead, gesture.finger.x, gesture.finger.y, false)
+          takePiece(next, gesture.finger.x, gesture.finger.y, false)
         } else if (piece && moved.blocked && moved.axis && !stillHeld(piece, gesture.finger, moved.axis)) {
           const dropped = piece
           const force = gesture.trend
           gesture.piece = null
           held = null
           sit(dropped, force)
-        } else if (!gesture.piece) {
-          const under = pieceAt(gesture.finger.x, gesture.finger.y, pieces)
-          if (under && under !== landing?.piece) takePiece(under, gesture.finger.x, gesture.finger.y, false)
+        } else if (!gesture.piece && next) {
+          takePiece(next, gesture.finger.x, gesture.finger.y, false)
         }
       }
       if (landing && landing.piece !== held && landing.piece.alive) {
