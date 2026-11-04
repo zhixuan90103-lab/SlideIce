@@ -31,6 +31,16 @@ export function mountHint() {
     mesh.scale.setScalar(level <= 0 ? 1 : 1 + HINT_SCALE * level)
   }
 
+  function compact(): void {
+    let alive = 0
+    for (const item of hints) {
+      if (item.target <= 0 && item.level <= 0) continue
+      hints[alive] = item
+      alive += 1
+    }
+    hints.length = alive
+  }
+
   return {
     /** Meshes a release would remove. Empty clears the glow. */
     set(meshes: THREE.Object3D[]): void {
@@ -38,13 +48,7 @@ export function mountHint() {
       for (const mesh of meshes) {
         if (!hints.some((item) => item.mesh === mesh)) hints.push({ mesh, level: 0, target: 1 })
       }
-      let alive = 0
-      for (const item of hints) {
-        if (item.target <= 0 && item.level <= 0) continue
-        hints[alive] = item
-        alive += 1
-      }
-      hints.length = alive
+      compact()
     },
     step(dt: number): void {
       const hintStep = dt / HINT_SECONDS
@@ -53,13 +57,7 @@ export function mountHint() {
         else if (item.level > item.target) item.level = Math.max(item.target, item.level - hintStep)
         paint(item.mesh, item.level)
       }
-      let alive = 0
-      for (const item of hints) {
-        if (item.target <= 0 && item.level <= 0) continue
-        hints[alive] = item
-        alive += 1
-      }
-      hints.length = alive
+      compact()
     },
   }
 }

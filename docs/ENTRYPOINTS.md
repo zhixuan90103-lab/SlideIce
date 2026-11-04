@@ -18,11 +18,14 @@ index.html
   → main.ts
        → applyNativeClass / safeArea
        → createRenderer(#stage)
-       → demo scene
+       → 透视相机（俯仰 −5°，距离见 STAGE.md）
        → mountDevicePreview → computeStageLayout → applyStageTransform
        → watchStageLayout
-       → haptics + HUD buttons
+       → mountSlideGame（src/game/，规则见 GAME.md）
+       → #ui-root：FPS、收起的设置
 ```
+
+第一关不调用震动，页面上没有「点我震动」。插件注册仍见下文，接线见 [HAPTICS.md](./HAPTICS.md)。
 
 ## 3. DOM
 
@@ -50,10 +53,9 @@ Xcode Run 真机
   → capacitorDidLoad → registerPluginInstance(AdvancedHapticsPlugin)
   → load App/public (= dist)
   → 同上 Web 链
-  → HUD「点我震动」→ haptics.impact('medium')
 ```
 
-HUD 状态行有 `plugin: true/false`。`false` = 仍在默认 `CAPBridgeViewController`，插件未进 JS `PluginHeaders`。
+插件是否进 JS，以 [HAPTICS.md §0](./HAPTICS.md) 的验收为准。当前关卡不挂震动按钮。`SceneDelegate` 仍是默认 `CAPBridgeViewController` 时，插件不会注册。
 
 ## 5. 改配置找谁
 
@@ -63,6 +65,7 @@ HUD 状态行有 `plugin: true/false`。`false` = 仍在默认 `CAPBridgeViewCon
 | appId | `capacitor.config.ts` |
 | 设计分辨率 | `design.ts` + `style.css` |
 | 震动原生 | `plugins/native-haptics/*.swift` + bootstrap |
-| 启动 HUD | `index.html` + `main.ts` |
+| 玩法 | `src/game/`，规则 [GAME.md](./GAME.md) |
+| 设置面板、FPS | `src/main.ts` 挂到 `#ui-root` |
 | 音效（规划） | [AUDIO.md](./AUDIO.md) |
 | 震动接线 | [HAPTICS.md](./HAPTICS.md) |

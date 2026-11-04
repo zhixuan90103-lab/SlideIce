@@ -8,7 +8,8 @@
  */
 
 import * as THREE from 'three'
-import { DESIGN_HEIGHT, DESIGN_WIDTH, type StageLayout } from '../adapt/design'
+import { DESIGN_HEIGHT, clientToDesign, isInDesignBounds, type StageLayout } from '../adapt/design'
+import { pulseHaptic } from './hapticFeel'
 import { mountHint } from './hint'
 import { CELL } from './look'
 import { beginRock, rockRotation, stepRock, type Rock } from './rock'
@@ -47,6 +48,8 @@ type Gesture = {
   fromPress: boolean
   samples: FingerSample[]
   trend: AxisLock | null
+  /** True while this step is still against the same contact. */
+  blocked: boolean
 }
 
 type Landing = {
@@ -69,8 +72,6 @@ export type SlideGame = {
     camera: THREE.Camera,
   ): void
   dispose(): void
-  /** Kept so the camera aim stays where main.ts left it. */
-  setPieceHeight(height: number): number
   setRoughness(roughness: number): void
   setLights(
     keyIntensity: number,
@@ -99,9 +100,10 @@ export function mountSlideGame(
   const maskMaterial = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: true, depthTest: true })
   const maskRestore: THREE.Material[] = []
   let gesture: Gesture | null = null
-  let landing: Landing | null = null
+  const landings: Landing[] = []
   const rocks = new Map<StagePiece, Rock>()
   let ended = false
+  let readyLit = false
   let held: StagePiece | null = null
   const shatters: Shatter[] = []
   const praise = freshPraise()
@@ -110,20 +112,33 @@ export function mountSlideGame(
   const designOf = (event: PointerEvent): { x: number; y: number } | null => {
     const layout = getLayout()
     if (!layout) return null
-    const rect = stage.getBoundingClientRect()
-    pointer.x = (event.clientX - rect.left) / layout.scale
-    pointer.y = (event.clientY - rect.top) / layout.scale
+    const point = clientToDesign(event.clientX, event.clientY, stage.getBoundingClientRect(), layout.scale)
+    pointer.x = point.x
+    pointer.y = point.y
     return pointer
   }
 
-  const inDesign = (x: number, y: number) =>
-    x >= 0 && y >= 0 && x <= DESIGN_WIDTH && y <= DESIGN_HEIGHT
+  const inDesign = (x: number, y: number) => isInDesignBounds(x, y)
+
+  const isLanding = (piece: StagePiece) => landings.some((item) => item.piece === piece)
+
+  const dropLanding = (piece: StagePiece) => {
+    const index = landings.findIndex((item) => item.piece === piece)
+    if (index >= 0) landings.splice(index, 1)
+  }
+
+  const setLanding = (next: Landing) => {
+    const index = landings.findIndex((item) => item.piece === next.piece)
+    if (index >= 0) landings[index] = next
+    else landings.push(next)
+  }
 
   const eliminate = (piece: StagePiece) => {
-    if (landing?.piece === piece) landing = null
+    dropLanding(piece)
     const { x, y } = piece.anchor.position
     piece.alive = false
     piece.mesh.visible = false
+    pulseHaptic('clear')
     const burst = makeShatter(scene, chipPoints(piece), x, y, pieceColor(piece))
     if (burst) shatters.push(burst)
     showPraise(x, -y, notePraiseClear(praise, 1))
@@ -145,6 +160,10 @@ export function mountSlideGame(
     gesture.grabY = fingerY
     gesture.fromPress = fromPress
     held = piece
+    dropLanding(piece)
+    flatten(piece)
+    gesture.blocked = false
+    pulseHaptic('grab')
   }
 
   /** Recent trend turned. Later travel starts at this finger, so the old cross slack is not applied. */
@@ -193,7 +212,7 @@ export function mountSlideGame(
 
   const sit = (piece: StagePiece, force: AxisLock | null) => {
     const home = gridSnap(piece, pieces)
-    landing = { piece, x: home.x, y: home.y, leave: false, speed: LAND_SPEED, settle: force }
+    setLanding({ piece, x: home.x, y: home.y, leave: false, speed: LAND_SPEED, settle: force })
     armRock(piece, home.x - piece.anchor.position.x, home.y - piece.anchor.position.y, force)
   }
 
@@ -207,11 +226,12 @@ export function mountSlideGame(
       return
     }
     if (plan.kind === 'slide') {
-      landing = { piece, x: plan.x, y: plan.y, leave: plan.clear, speed: plan.speed, settle: null }
+      const next: Landing = { piece, x: plan.x, y: plan.y, leave: plan.clear, speed: plan.speed, settle: null }
       if (!plan.clear) {
-        landing.settle = trend
+        next.settle = trend
         armRock(piece, plan.x - piece.anchor.position.x, plan.y - piece.anchor.position.y, trend)
       }
+      setLanding(next)
       return
     }
     sit(piece, trend)
@@ -223,10 +243,8 @@ export function mountSlideGame(
     // A second finger while the first is still held does not start a gesture.
     // A new press after a missed pointerup takes over, so the next piece is not lost.
     if (gesture && gesture.id !== event.pointerId && stage.hasPointerCapture(gesture.id)) return
-    if (landing) {
-      flatten(landing.piece)
-      landing = null
-    }
+    for (const item of landings) flatten(item.piece)
+    landings.length = 0
     if (gesture?.piece) release(gesture.piece)
     else if (gesture) endGesture()
     const point = designOf(event)
@@ -246,6 +264,7 @@ export function mountSlideGame(
       fromPress: false,
       samples: [],
       trend: null,
+      blocked: false,
     }
     if (hit) takePiece(hit, point.x, point.y, true)
     rememberFinger(gesture.samples, event.timeStamp / 1000, point.x, point.y)
@@ -291,9 +310,6 @@ export function mountSlideGame(
     setRoughness(roughness: number): void {
       stageLook.setRoughness(roughness)
     },
-    setPieceHeight(height: number): number {
-      return height
-    },
     update(dt) {
       if (gesture) {
         const moved = followHold(
@@ -311,6 +327,8 @@ export function mountSlideGame(
           gesture.trend,
         )
         if (moved.axis) gesture.trend = moved.axis
+        if (moved.blocked && !gesture.blocked) pulseHaptic('hit')
+        gesture.blocked = moved.blocked
         const piece = gesture.piece
         if (piece && gesture.trend) {
           const turned = recentAxis(gesture.samples, gesture.trend.axis)
@@ -326,7 +344,7 @@ export function mountSlideGame(
           gesture.trend,
           gesture.finger.x,
           gesture.finger.y,
-          landing?.piece ?? null,
+          isLanding,
         )
         if (piece && next && next !== piece) {
           const dropped = piece
@@ -345,7 +363,12 @@ export function mountSlideGame(
           takePiece(next, gesture.finger.x, gesture.finger.y, false)
         }
       }
-      if (landing && landing.piece !== held && landing.piece.alive) {
+      for (let i = landings.length - 1; i >= 0; i--) {
+        const landing = landings[i]
+        if (!landing || landing.piece === held || !landing.piece.alive) {
+          landings.splice(i, 1)
+          continue
+        }
         const dx = landing.x - landing.piece.anchor.position.x
         const dy = landing.y - landing.piece.anchor.position.y
         const dist = Math.hypot(dx, dy)
@@ -353,15 +376,21 @@ export function mountSlideGame(
         if (dist <= step || dist < 0.01) {
           landing.piece.anchor.position.x = landing.x
           landing.piece.anchor.position.y = landing.y
-          const done = landing
-          landing = null
-          if (done.leave) eliminate(done.piece)
+          landings.splice(i, 1)
+          if (landing.leave) eliminate(landing.piece)
           else {
-            const home = gridSnap(done.piece, pieces)
-            if (Math.hypot(home.x - done.piece.anchor.position.x, home.y - done.piece.anchor.position.y) > 0.01) {
-              landing = { piece: done.piece, x: home.x, y: home.y, leave: false, speed: LAND_SPEED, settle: done.settle }
+            const home = gridSnap(landing.piece, pieces)
+            if (Math.hypot(home.x - landing.piece.anchor.position.x, home.y - landing.piece.anchor.position.y) > 0.01) {
+              setLanding({
+                piece: landing.piece,
+                x: home.x,
+                y: home.y,
+                leave: false,
+                speed: LAND_SPEED,
+                settle: landing.settle,
+              })
             } else {
-              const rock = rocks.get(done.piece)
+              const rock = rocks.get(landing.piece)
               if (rock) rock.seated = true
             }
           }
@@ -375,6 +404,9 @@ export function mountSlideGame(
         const plan = planRelease(held, pieces, gesture.trend, gesture.samples)
         if (plan.kind === 'eliminate' || (plan.kind === 'slide' && plan.clear)) hintTargets.push(held.mesh)
       }
+      const ready = hintTargets.length > 0
+      if (ready && !readyLit) pulseHaptic('ready')
+      readyLit = ready
       hint.set(hintTargets)
       hint.step(dt)
       for (const [piece, rock] of rocks) {
@@ -386,7 +418,7 @@ export function mountSlideGame(
         piece.mesh.rotation.x = tilt.x
         piece.mesh.rotation.y = tilt.y
       }
-    stepShatters(shatters, -DESIGN_HEIGHT - SHATTER.chip, dt)
+      stepShatters(shatters, -DESIGN_HEIGHT - SHATTER.chip, dt)
       for (let i = shatters.length - 1; i >= 0; i--) {
         if (!shatters[i].dead) continue
         disposeShatter(shatters[i])
@@ -424,17 +456,20 @@ export function mountSlideGame(
       }
       const autoClear = renderer.autoClear
       const background = scene.background
-      scene.background = null
-      renderer.autoClear = false
-      renderer.clearDepth()
-      camera.layers.set(1)
-      renderer.render(scene, camera)
-      camera.layers.set(0)
-      renderer.autoClear = autoClear
-      scene.background = background
-      for (let i = 0; i < active.length; i++) {
-        active[i].mesh.layers.disable(1)
-        active[i].mesh.material = maskRestore[i]
+      try {
+        scene.background = null
+        renderer.autoClear = false
+        renderer.clearDepth()
+        camera.layers.set(1)
+        renderer.render(scene, camera)
+      } finally {
+        camera.layers.set(0)
+        renderer.autoClear = autoClear
+        scene.background = background
+        for (let i = 0; i < active.length; i++) {
+          active[i].mesh.layers.disable(1)
+          active[i].mesh.material = maskRestore[i]
+        }
       }
     },
     dispose() {

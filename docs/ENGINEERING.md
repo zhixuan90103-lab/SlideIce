@@ -18,7 +18,7 @@ portrait-webgpu-base/
 ├── capacitor.config.ts     # contentInset never · scrollEnabled false
 ├── src/
 │   ├── main.ts             # 启动舞台，玩法在 game/
-│   ├── game/               # 第一关，见 GAME.md
+│   ├── game/               # 第一关。规则 GAME.md，画面 STAGE.md，入口表 GAME.md §5
 │   ├── create-renderer.ts
 │   ├── style.css
 │   ├── adapt/
@@ -71,7 +71,7 @@ offset = 居中
 renderer.setSize(390, 844)          // 始终设计分辨率
 ```
 
-触控：`clientToDesign`；letterbox 外忽略。
+触控：`clientToDesign` 用 `#stage` 的边框换算；letterbox 外忽略。玩法里不要再写第二套换算。碰撞、格子和轮廓的唯一入口见 [GAME.md §5](./GAME.md)。
 
 ## 5. Safe Area
 

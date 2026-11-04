@@ -1,12 +1,19 @@
 /**
  * One-axis drag in design space.
  * world x = design x, world y = -design y.
- * A press selects without moving. Past the dead zone, the longer axis locks until release.
- * Travel on that axis drops the dead zone once, so the piece does not jump. Collision stops at first contact.
+ * A press selects without moving. Past the dead zone, one axis locks.
+ * Travel on that axis drops the dead zone once, so the piece does not jump.
+ * Block contact is one sweep. The board edge is asked through stage.ts.
  */
 
 import { CELL } from './look'
-import { boardRect, nearestCellCenter, type StagePiece } from './stage'
+import {
+  crossesEdge,
+  exitDistance,
+  nearestCellCenter,
+  poseOnBoard,
+  type StagePiece,
+} from './stage'
 
 /** Design-space radius. Inside it the selected piece does not move. */
 export const DRAG_DEAD = 8
@@ -41,7 +48,23 @@ function takeSample(t: number, x: number, y: number): FingerSample {
   return { t, x, y }
 }
 
-/** Recent window used to judge a fast swipe. Keeps the newest two samples. */
+const TREND_SPAN = 16
+
+function polylineFrom(samples: readonly FingerSample[], start: number): number {
+  let dist = 0
+  for (let i = start + 1; i < samples.length; i++) {
+    const here = samples[i]
+    const prev = samples[i - 1]
+    if (!here || !prev) break
+    dist += Math.hypot(here.x - prev.x, here.y - prev.y)
+  }
+  return dist
+}
+
+/**
+ * One buffer for the gesture.
+ * Drops points only after both the 0.08s speed window and the 16px trend span still fit.
+ */
 export function rememberFinger(samples: FingerSample[], t: number, x: number, y: number): void {
   const prev = samples[samples.length - 1]
   if (prev && t <= prev.t) {
@@ -50,8 +73,7 @@ export function rememberFinger(samples: FingerSample[], t: number, x: number, y:
     return
   }
   samples.push(takeSample(t, x, y))
-  const start = t - FAST_WINDOW
-  while (samples.length > 2 && samples[0].t < start) {
+  while (samples.length > 2 && t - samples[0].t > FAST_WINDOW && polylineFrom(samples, 1) >= TREND_SPAN) {
     const old = samples.shift()
     if (old) samplePool.push(old)
   }
@@ -63,17 +85,13 @@ export function releaseFinger(samples: FingerSample[]): void {
   samples.length = 0
 }
 
-const othersScratch: StagePiece[] = []
-const axisMove = { moved: 0, blocked: false }
-
-/** Alive pieces except the one being moved. The array is reused on the next call. */
-function aliveOthers(pieces: readonly StagePiece[], piece: StagePiece): readonly StagePiece[] {
-  othersScratch.length = 0
+function othersOf(pieces: readonly StagePiece[], piece: StagePiece): StagePiece[] {
+  const others: StagePiece[] = []
   for (let i = 0; i < pieces.length; i++) {
     const item = pieces[i]
-    if (item !== piece && item.alive) othersScratch.push(item)
+    if (item !== piece && item.alive) others.push(item)
   }
-  return othersScratch
+  return others
 }
 
 export type AxisLock = { axis: 'x' | 'y'; sign: number }
@@ -95,8 +113,6 @@ export function lockAxis(
   if (ay >= ax * ratio) return { axis: 'y', sign: Math.sign(worldDy) || 1 }
   return null
 }
-
-const TREND_SPAN = 16
 
 /**
  * Axis of the recent finger chord, once it is longer than the locked axis
@@ -125,21 +141,24 @@ export function recentAxis(samples: readonly FingerSample[], locked: 'x' | 'y'):
   return { axis: locked === 'x' ? 'y' : 'x', sign: Math.sign(cross) || 1 }
 }
 
-/** First piece in front of `piece` along `side`, or null when that way is open. */
-export function pieceAhead(
+type Sweep = { t: number; piece: StagePiece | null }
+
+/**
+ * First contact along one axis. `t` is 0 at the start pose and 1 at the end of (dx, dy).
+ * The other axis must be 0. `piece` is the block that caused the earliest hit.
+ */
+function sweep(
   piece: StagePiece,
-  pieces: readonly StagePiece[],
-  side: AxisLock,
-): StagePiece | null {
-  const ox = piece.anchor.position.x
-  const oy = piece.anchor.position.y
-  const reach = Math.max(exitDistance(piece, ox, oy, side), CELL * 8)
-  const dx = side.axis === 'x' ? side.sign * reach : 0
-  const dy = side.axis === 'y' ? side.sign * reach : 0
-  let best = 1
+  ox: number,
+  oy: number,
+  dx: number,
+  dy: number,
+  others: readonly StagePiece[],
+): Sweep {
+  let t = 1
   let hit: StagePiece | null = null
-  for (const other of pieces) {
-    if (other === piece || !other.alive) continue
+  if (dx === 0 && dy === 0) return { t: 1, piece: null }
+  for (const other of others) {
     const limit = piece.half + other.half
     for (const a of piece.locals) {
       const ax = ox + a.x
@@ -153,15 +172,30 @@ export function pieceAhead(
         if (delta === 0 || Math.abs(perp) >= limit) continue
         const enter = Math.min((-limit - rel) / delta, (limit - rel) / delta)
         const exit = Math.max((-limit - rel) / delta, (limit - rel) / delta)
-        if (exit <= 0 || enter >= best) continue
-        if (enter < best) {
-          best = Math.max(0, enter)
+        if (exit <= 0 || enter >= t) continue
+        if (enter < t) {
+          t = Math.max(0, enter)
           hit = other
         }
       }
     }
   }
-  return hit
+  return { t, piece: hit }
+}
+
+/** First piece in front of `piece` along `side`, or null when that way is open. */
+export function pieceAhead(
+  piece: StagePiece,
+  pieces: readonly StagePiece[],
+  side: AxisLock,
+): StagePiece | null {
+  const ox = piece.anchor.position.x
+  const oy = piece.anchor.position.y
+  const reach = Math.max(exitDistance(piece, ox, oy, side.axis, side.sign), CELL * 8)
+  const dx = side.axis === 'x' ? side.sign * reach : 0
+  const dy = side.axis === 'y' ? side.sign * reach : 0
+  const hit = sweep(piece, ox, oy, dx, dy, othersOf(pieces, piece))
+  return hit.t < 1 ? hit.piece : null
 }
 
 function alongScore(piece: StagePiece, side: AxisLock): number {
@@ -173,6 +207,7 @@ function alongScore(piece: StagePiece, side: AxisLock): number {
  * Piece that should replace the held one.
  * Still on the held piece: only the piece directly ahead, once the finger touches it.
  * Finger has left the held piece and rests on another: that piece, even when the sweep missed it.
+ * `skip` rejects pieces that are already landing.
  */
 export function replacementTarget(
   current: StagePiece | null,
@@ -180,17 +215,17 @@ export function replacementTarget(
   trend: AxisLock | null,
   x: number,
   y: number,
-  skip: StagePiece | null,
+  skip: (piece: StagePiece) => boolean,
 ): StagePiece | null {
   const hits: StagePiece[] = []
   for (const piece of pieces) {
-    if (!piece.alive || piece === skip) continue
+    if (!piece.alive || skip(piece)) continue
     if (coversPiece(piece, x, y)) hits.push(piece)
   }
   if (current && hits.includes(current)) {
     if (!trend) return null
     const ahead = pieceAhead(current, pieces, trend)
-    if (ahead && ahead !== skip && hits.includes(ahead)) return ahead
+    if (ahead && !skip(ahead) && hits.includes(ahead)) return ahead
     return null
   }
   const others = hits.filter((piece) => piece !== current)
@@ -264,22 +299,28 @@ export function followHold(
       : -(last.y - grabY)
   const goalX = axis.axis === 'x' ? originX + travel : originX
   const goalY = axis.axis === 'y' ? originY + travel : originY
-  const others = aliveOthers(pieces, piece)
+  const others = othersOf(pieces, piece)
   const pushX = goalX - piece.anchor.position.x
   const pushY = goalY - piece.anchor.position.y
-  moveAxis(piece, 'x', pushX, others, axisMove)
-  const hitX = axisMove.blocked && pushX !== 0
-  moveAxis(piece, 'y', pushY, others, axisMove)
-  const hitY = axisMove.blocked && pushY !== 0
+  const hitX = moveAxis(piece, 'x', pushX, others)
+  const hitY = moveAxis(piece, 'y', pushY, others)
   return { axis, blocked: hitX || hitY }
 }
 
-/** Speed of the samples still in the recent window. */
-export function windowSpeed(samples: readonly FingerSample[]): number {
-  const first = samples[0]
+/** Speed along `axis` inside the recent time window. The cross-axis part is not included. */
+export function windowSpeed(samples: readonly FingerSample[], axis: 'x' | 'y' | null): number {
   const last = samples[samples.length - 1]
-  if (!first || !last || last.t <= first.t) return 0
-  return Math.hypot(last.x - first.x, last.y - first.y) / (last.t - first.t)
+  if (!last || !axis) return 0
+  let first = last
+  for (let i = samples.length - 1; i >= 0; i--) {
+    const sample = samples[i]
+    if (!sample) break
+    if (last.t - sample.t > FAST_WINDOW) break
+    first = sample
+  }
+  if (last.t <= first.t) return 0
+  const along = axis === 'x' ? last.x - first.x : -(last.y - first.y)
+  return Math.abs(along) / (last.t - first.t)
 }
 
 export type ReleasePlan =
@@ -288,8 +329,8 @@ export type ReleasePlan =
   | { kind: 'snap' }
 
 /**
- * Already out of range eliminates at once.
- * A piece still on the board slides on only while the recent window is still fast.
+ * Already out along the locked axis eliminates at once.
+ * A piece still on the board slides on only while the recent window is still fast on that axis.
  * Anything else returns to a cell.
  */
 export function planRelease(
@@ -298,8 +339,8 @@ export function planRelease(
   trend: AxisLock | null,
   samples: readonly FingerSample[],
 ): ReleasePlan {
-  if (canLeave(piece, pieces)) return { kind: 'eliminate' }
-  const speed = windowSpeed(samples)
+  if (trend && canLeave(piece, pieces, trend)) return { kind: 'eliminate' }
+  const speed = windowSpeed(samples, trend?.axis ?? null)
   if (!trend || speed < FAST_SPEED) return { kind: 'snap' }
   const slide = slideAlong(piece, pieces, trend)
   const dist = Math.hypot(slide.x - piece.anchor.position.x, slide.y - piece.anchor.position.y)
@@ -320,14 +361,14 @@ export function gridSnap(piece: StagePiece, pieces: readonly StagePiece[]): { x:
   const cell = nearestCellCenter(ax + local.x, ay + local.y)
   const baseX = cell.x - local.x
   const baseY = cell.y - local.y
-  const others = aliveOthers(pieces, piece)
+  const others = othersOf(pieces, piece)
   for (let distance = 0; distance <= 12; distance++) {
     for (let dc = -distance; dc <= distance; dc++) {
       for (let dr = -distance; dr <= distance; dr++) {
         if (Math.abs(dc) + Math.abs(dr) !== distance) continue
         const x = baseX + dc * CELL
         const y = baseY - dr * CELL
-        if (!cellsOnBoard(piece, x, y) || overlaps(piece, x, y, others)) continue
+        if (!poseOnBoard(piece, x, y) || overlaps(piece, x, y, others)) continue
         return { x, y }
       }
     }
@@ -336,115 +377,48 @@ export function gridSnap(piece: StagePiece, pieces: readonly StagePiece[]): { x:
 }
 
 /**
- * The piece is at least one cell away from the nearest on-board landing,
- * already past the board edge, and the rest of that exit is clear.
- * A shorter nudge can still return to the board.
+ * Past the board on `side`, at least one cell from the nearest on-board landing,
+ * and the rest of that exit is clear. A shorter nudge can still return.
  */
-export function canLeave(piece: StagePiece, pieces: readonly StagePiece[], x = piece.anchor.position.x, y = piece.anchor.position.y): boolean {
-  if (outsideFraction(piece, x, y) <= 0) return false
+export function canLeave(
+  piece: StagePiece,
+  pieces: readonly StagePiece[],
+  side: AxisLock,
+  x = piece.anchor.position.x,
+  y = piece.anchor.position.y,
+): boolean {
+  if (!crossesEdge(piece, x, y, side.axis, side.sign)) return false
   const home = gridSnap(piece, pieces)
   if (Math.hypot(home.x - x, home.y - y) < CELL) return false
-  const others = aliveOthers(pieces, piece)
-  for (const side of crossedSides(piece, x, y)) {
-    const dist = exitDistance(piece, x, y, side)
-    if (dist <= 0.01) return true
-    const dx = side.axis === 'x' ? side.sign * dist : 0
-    const dy = side.axis === 'y' ? side.sign * dist : 0
-    if (sweepStop(piece, x, y, dx, dy, others) >= 1) return true
-  }
-  return false
+  const dist = exitDistance(piece, x, y, side.axis, side.sign)
+  if (dist <= 0.01) return true
+  const dx = side.axis === 'x' ? side.sign * dist : 0
+  const dy = side.axis === 'y' ? side.sign * dist : 0
+  return sweep(piece, x, y, dx, dy, othersOf(pieces, piece)).t >= 1
 }
-
-/** Share of the visible cubes that lies outside the current board. Gaps are not area. */
-export function outsideFraction(piece: StagePiece, x = piece.anchor.position.x, y = piece.anchor.position.y): number {
-  const board = boardRect()
-  const side = piece.half * 2
-  if (side <= 0 || piece.locals.length === 0) return 0
-  let outside = 0
-  for (const local of piece.locals) {
-    const left = x + local.x - piece.half
-    const right = x + local.x + piece.half
-    const bottom = y + local.y - piece.half
-    const top = y + local.y + piece.half
-    const width = overlap(left, right, board.minX, board.maxX)
-    const height = overlap(bottom, top, board.minY, board.maxY)
-    outside += side * side - width * height
-  }
-  return outside / (piece.locals.length * side * side)
-}
-
-const unlockWays: AxisLock[] = [
-  { axis: 'x', sign: 1 },
-  { axis: 'x', sign: -1 },
-  { axis: 'y', sign: 1 },
-  { axis: 'y', sign: -1 },
-]
 
 function moveAxis(
   piece: StagePiece,
   axis: 'x' | 'y',
   amount: number,
   others: readonly StagePiece[],
-  out: { moved: number; blocked: boolean },
-): void {
-  if (amount === 0) {
-    out.moved = 0
-    out.blocked = false
-    return
-  }
+): boolean {
+  if (amount === 0) return false
   const dx = axis === 'x' ? amount : 0
   const dy = axis === 'y' ? amount : 0
   const ox = piece.anchor.position.x
   const oy = piece.anchor.position.y
-  if (overlaps(piece, ox, oy, others)) {
-    out.moved = 0
-    out.blocked = false
-    return
-  }
-  const stop = sweepStop(piece, ox, oy, dx, dy, others)
-  if (stop >= 1) {
+  if (overlaps(piece, ox, oy, others)) return false
+  const hit = sweep(piece, ox, oy, dx, dy, others)
+  if (hit.t >= 1) {
     piece.anchor.position.x = ox + dx
     piece.anchor.position.y = oy + dy
-    out.moved = amount
-    out.blocked = false
-    return
+    return false
   }
-  const t = Math.max(0, stop)
+  const t = Math.max(0, hit.t)
   piece.anchor.position.x = ox + dx * t
   piece.anchor.position.y = oy + dy * t
-  out.moved = amount * t
-  out.blocked = true
-}
-
-function sweepStop(
-  piece: StagePiece,
-  ox: number,
-  oy: number,
-  dx: number,
-  dy: number,
-  others: readonly StagePiece[],
-): number {
-  let stop = 1
-  for (const other of others) {
-    const limit = piece.half + other.half
-    for (const a of piece.locals) {
-      const ax = ox + a.x
-      const ay = oy + a.y
-      for (const b of other.locals) {
-        const bx = other.anchor.position.x + b.x
-        const by = other.anchor.position.y + b.y
-        const rel = dx !== 0 ? ax - bx : ay - by
-        const delta = dx !== 0 ? dx : dy
-        const perp = dx !== 0 ? ay - by : ax - bx
-        if (delta === 0 || Math.abs(perp) >= limit) continue
-        const enter = Math.min((-limit - rel) / delta, (limit - rel) / delta)
-        const exit = Math.max((-limit - rel) / delta, (limit - rel) / delta)
-        if (exit <= 0 || enter >= stop) continue
-        if (enter < stop) stop = Math.max(0, enter)
-      }
-    }
-  }
-  return stop
+  return true
 }
 
 function overlaps(piece: StagePiece, x: number, y: number, others: readonly StagePiece[]): boolean {
@@ -461,43 +435,6 @@ function overlaps(piece: StagePiece, x: number, y: number, others: readonly Stag
   return false
 }
 
-function cellsOnBoard(piece: StagePiece, x: number, y: number): boolean {
-  const board = boardRect()
-  const count = Math.round((board.maxX - board.minX) / CELL)
-  for (const local of piece.locals) {
-    const col = Math.round((x + local.x - board.minX) / CELL - 0.5)
-    const row = Math.round((board.maxY - (y + local.y)) / CELL - 0.5)
-    if (col < 0 || row < 0 || col >= count || row >= count) return false
-  }
-  return true
-}
-
-const crossed: AxisLock[] = []
-
-function crossedSides(piece: StagePiece, x: number, y: number): readonly AxisLock[] {
-  const board = boardRect()
-  let east = false
-  let west = false
-  let north = false
-  let south = false
-  for (const local of piece.locals) {
-    const left = x + local.x - piece.half
-    const right = x + local.x + piece.half
-    const bottom = y + local.y - piece.half
-    const top = y + local.y + piece.half
-    if (right > board.maxX) east = true
-    if (left < board.minX) west = true
-    if (top > board.maxY) north = true
-    if (bottom < board.minY) south = true
-  }
-  crossed.length = 0
-  if (east) crossed.push(unlockWays[0])
-  if (west) crossed.push(unlockWays[1])
-  if (north) crossed.push(unlockWays[2])
-  if (south) crossed.push(unlockWays[3])
-  return crossed
-}
-
 /**
  * Where a formed trend ends. `clear` means every cube can pass the board edge
  * without touching another piece. Otherwise the point is the first contact.
@@ -509,32 +446,13 @@ export function slideAlong(
 ): { x: number; y: number; clear: boolean } {
   const ox = piece.anchor.position.x
   const oy = piece.anchor.position.y
-  const dist = exitDistance(piece, ox, oy, side)
+  const dist = exitDistance(piece, ox, oy, side.axis, side.sign)
   const dx = side.axis === 'x' ? side.sign * dist : 0
   const dy = side.axis === 'y' ? side.sign * dist : 0
   if (dist <= 0.01) return { x: ox, y: oy, clear: true }
-  const stop = sweepStop(piece, ox, oy, dx, dy, aliveOthers(pieces, piece))
-  const scale = stop >= 1 ? 1 : Math.max(0, stop - 1e-4)
-  return { x: ox + dx * scale, y: oy + dy * scale, clear: stop >= 1 }
-}
-
-/** Distance along a signed axis until every visible cube is past that edge. */
-function exitDistance(piece: StagePiece, x: number, y: number, side: AxisLock): number {
-  const board = boardRect()
-  let need = 0
-  for (const local of piece.locals) {
-    const cx = x + local.x
-    const cy = y + local.y
-    if (side.axis === 'x' && side.sign > 0) need = Math.max(need, board.maxX - (cx - piece.half))
-    if (side.axis === 'x' && side.sign < 0) need = Math.max(need, cx + piece.half - board.minX)
-    if (side.axis === 'y' && side.sign > 0) need = Math.max(need, board.maxY - (cy - piece.half))
-    if (side.axis === 'y' && side.sign < 0) need = Math.max(need, cy + piece.half - board.minY)
-  }
-  return need
-}
-
-function overlap(a0: number, a1: number, b0: number, b1: number): number {
-  return Math.max(0, Math.min(a1, b1) - Math.max(a0, b0))
+  const hit = sweep(piece, ox, oy, dx, dy, othersOf(pieces, piece))
+  const scale = hit.t >= 1 ? 1 : Math.max(0, hit.t - 1e-4)
+  return { x: ox + dx * scale, y: oy + dy * scale, clear: hit.t >= 1 }
 }
 
 export function coversPiece(piece: StagePiece, x: number, y: number): boolean {

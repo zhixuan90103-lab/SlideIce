@@ -209,7 +209,6 @@ async function boot(): Promise<void> {
 
   const fps = mountFps();
   game = mountSlideGame(scene, stage, () => latestLayout);
-  look.topZ = game.setPieceHeight(40);
   look.pitch = -5;
   applyCamera(camera);
   mountLookTune(camera, game);

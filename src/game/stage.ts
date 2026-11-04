@@ -1,8 +1,7 @@
 import * as THREE from 'three'
 import { DESIGN_HEIGHT, DESIGN_WIDTH } from '../adapt/design'
-import { LEVEL } from './level'
+import { GRID, LEVEL } from './level'
 import {
-  BOARD_GRID,
   CELL,
   BOARD_ROUGHNESS,
   FILL_COLOR,
@@ -11,7 +10,6 @@ import {
   HEMI_SKY,
   KEY_COLOR,
   PLASTIC_METALNESS,
-  PLASTIC_ROUGHNESS,
   SHADOW_OPACITY,
   SHADOW_Z,
   STAGE_BG,
@@ -21,7 +19,7 @@ import {
 const GAP = 4
 /** How far the silhouette shell sits outside the piece, in design pixels. */
 const OUTLINE = 4
-const BOARD = BOARD_GRID * CELL
+const BOARD = GRID * CELL
 const ORIGIN_X = (DESIGN_WIDTH - BOARD) / 2
 const ORIGIN_Y = (DESIGN_HEIGHT - BOARD) / 2
 
@@ -66,22 +64,106 @@ export function centerInGrid(x: number, y: number): boolean {
   return x >= board.minX && x <= board.maxX && y <= board.maxY && y >= board.minY
 }
 
-/** Nearest board-lattice cell center. The lattice continues past the board. */
-export function nearestCellCenter(x: number, y: number): { x: number; y: number } {
-  const col = Math.round((x - ORIGIN_X) / CELL - 0.5)
-  const row = Math.round((-y - ORIGIN_Y) / CELL - 0.5)
+/** Lattice cell containing a world point. The lattice continues past the board. */
+export function cellOf(worldX: number, worldY: number): { col: number; row: number } {
+  return {
+    col: Math.round((worldX - ORIGIN_X) / CELL - 0.5),
+    row: Math.round((-worldY - ORIGIN_Y) / CELL - 0.5),
+  }
+}
+
+export function cellCenter(col: number, row: number): { x: number; y: number } {
   return {
     x: ORIGIN_X + (col + 0.5) * CELL,
     y: -(ORIGIN_Y + (row + 0.5) * CELL),
   }
 }
 
+/** Nearest board-lattice cell center. The lattice continues past the board. */
+export function nearestCellCenter(x: number, y: number): { x: number; y: number } {
+  const cell = cellOf(x, y)
+  return cellCenter(cell.col, cell.row)
+}
+
+export function cellInside(col: number, row: number): boolean {
+  return col >= 0 && row >= 0 && col < GRID && row < GRID
+}
+
+/** Every cube of the piece sits on a cell of this level. */
+export function poseOnBoard(piece: StagePiece, x: number, y: number): boolean {
+  for (const local of piece.locals) {
+    const cell = cellOf(x + local.x, y + local.y)
+    if (!cellInside(cell.col, cell.row)) return false
+  }
+  return true
+}
+
+type CubeRect = { left: number; right: number; bottom: number; top: number }
+
+/** World XY bounds of each cube. Edge tests and the exit distance share this. */
+function eachCube(
+  piece: StagePiece,
+  x: number,
+  y: number,
+  visit: (rect: CubeRect) => void,
+): void {
+  for (const local of piece.locals) {
+    const cx = x + local.x
+    const cy = y + local.y
+    visit({
+      left: cx - piece.half,
+      right: cx + piece.half,
+      bottom: cy - piece.half,
+      top: cy + piece.half,
+    })
+  }
+}
+
+/**
+ * True when any cube has crossed that board edge.
+ * +x is east, −x is west, +y is north (screen up), −y is south.
+ */
+export function crossesEdge(
+  piece: StagePiece,
+  x: number,
+  y: number,
+  axis: 'x' | 'y',
+  sign: number,
+): boolean {
+  const board = boardRect()
+  let crossed = false
+  eachCube(piece, x, y, (rect) => {
+    if (axis === 'x' && sign > 0 && rect.right > board.maxX) crossed = true
+    if (axis === 'x' && sign < 0 && rect.left < board.minX) crossed = true
+    if (axis === 'y' && sign > 0 && rect.top > board.maxY) crossed = true
+    if (axis === 'y' && sign < 0 && rect.bottom < board.minY) crossed = true
+  })
+  return crossed
+}
+
+/** Distance along a signed axis until every cube is past that edge. */
+export function exitDistance(
+  piece: StagePiece,
+  x: number,
+  y: number,
+  axis: 'x' | 'y',
+  sign: number,
+): number {
+  const board = boardRect()
+  let need = 0
+  eachCube(piece, x, y, (rect) => {
+    if (axis === 'x' && sign > 0) need = Math.max(need, board.maxX - rect.left)
+    if (axis === 'x' && sign < 0) need = Math.max(need, rect.right - board.minX)
+    if (axis === 'y' && sign > 0) need = Math.max(need, board.maxY - rect.bottom)
+    if (axis === 'y' && sign < 0) need = Math.max(need, rect.top - board.minY)
+  })
+  return need
+}
+
 export function mountStage(scene: THREE.Scene): StageRig {
-  const ambient = new THREE.AmbientLight(HEMI_SKY, 0)
   const hemi = new THREE.HemisphereLight(HEMI_SKY, HEMI_GROUND, look.ambient)
   const key = new THREE.DirectionalLight(KEY_COLOR, look.key)
   const fill = new THREE.DirectionalLight(FILL_COLOR, look.fill)
-  const rim = new THREE.DirectionalLight(FILL_COLOR, 0)
   key.castShadow = true
   key.shadow.mapSize.set(2048, 2048)
   key.shadow.bias = -0.0008
@@ -98,7 +180,7 @@ export function mountStage(scene: THREE.Scene): StageRig {
   key.shadow.camera.top = shadowReach
   key.shadow.camera.bottom = -shadowReach
   key.shadow.camera.updateProjectionMatrix()
-  scene.add(ambient, hemi, key, fill, rim)
+  scene.add(hemi, key, fill)
   scene.add(key.target)
   const aim = new THREE.Vector3(DESIGN_WIDTH / 2, -DESIGN_HEIGHT / 2, 0)
   key.target.position.copy(aim)
@@ -124,7 +206,7 @@ export function mountStage(scene: THREE.Scene): StageRig {
     (color) =>
       new THREE.MeshStandardMaterial({
         color,
-        roughness: PLASTIC_ROUGHNESS,
+        roughness: look.roughness,
         metalness: PLASTIC_METALNESS,
         envMapIntensity: 0,
       }),
@@ -200,11 +282,9 @@ export function mountStage(scene: THREE.Scene): StageRig {
   return {
     pieces,
     setLights(keyIntensity, keyAzimuth, keyElevation, fillIntensity, fillAzimuth, fillElevation, ambientIntensity) {
-      ambient.intensity = 0
       hemi.intensity = ambientIntensity
       key.intensity = keyIntensity
       fill.intensity = fillIntensity
-      rim.intensity = 0
       placeLight(key, keyAzimuth, keyElevation)
       placeLight(fill, fillAzimuth, fillElevation)
     },
@@ -213,6 +293,7 @@ export function mountStage(scene: THREE.Scene): StageRig {
     },
     setRoughness(roughness) {
       const value = Math.min(1, Math.max(0, roughness))
+      look.roughness = value
       for (const material of pieceMats) material.roughness = value
     },
   }
@@ -241,11 +322,11 @@ function gridTexture(): THREE.CanvasTexture {
   canvas.height = size
   const ctx = canvas.getContext('2d')!
   ctx.clearRect(0, 0, size, size)
-  const cell = size / BOARD_GRID
+  const cell = size / GRID
   const gap = (GAP / CELL) * cell
   ctx.fillStyle = 'rgba(150, 110, 72, 0.14)'
-  for (let row = 0; row < BOARD_GRID; row++) {
-    for (let col = 0; col < BOARD_GRID; col++) {
+  for (let row = 0; row < GRID; row++) {
+    for (let col = 0; col < GRID; col++) {
       const x = col * cell + gap / 2
       const y = row * cell + gap / 2
       const w = cell - gap
@@ -398,20 +479,12 @@ function pieceOutline(
     if ((prev[0] === point[0] && point[0] === nxt[0]) || (prev[1] === point[1] && point[1] === nxt[1])) continue
     welded.push(point)
   }
-  const inward = (a: readonly [number, number], b: readonly [number, number]): [number, number] => {
-    const dx = b[0] - a[0]
-    const dy = b[1] - a[1]
-    const len = Math.hypot(dx, dy) || 1
-    return [-dy / len, dx / len]
-  }
-  const offset: [number, number][] = welded.map((point, i) => {
-    const prev = welded[(i + welded.length - 1) % welded.length]
-    const nxt = welded[(i + 1) % welded.length]
-    const in1 = inward(prev, point)
-    const in2 = inward(point, nxt)
-    return [point[0] * CELL + (in1[0] + in2[0]) * inset, point[1] * CELL + (in1[1] + in2[1]) * inset]
-  })
-  return filletConvex(offset, radius).map(([x, y]) => [ORIGIN_X + x - home.x, -(ORIGIN_Y + y) - home.y])
+  const pixels: [number, number][] = welded.map((point) => [point[0] * CELL, point[1] * CELL])
+  // Positive offsetClosed distance is outward. The body is inset, then filleted.
+  return filletConvex(offsetClosed(pixels, -inset), radius).map(([x, y]) => [
+    ORIGIN_X + x - home.x,
+    -(ORIGIN_Y + y) - home.y,
+  ])
 }
 
 function filletConvex(points: [number, number][], radius: number): [number, number][] {

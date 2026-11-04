@@ -6,7 +6,7 @@
  */
 
 import * as THREE from 'three'
-import { PLASTIC_METALNESS, PLASTIC_ROUGHNESS } from './look'
+import { PLASTIC_METALNESS, look } from './look'
 
 const RING = 844 / 10
 
@@ -84,7 +84,7 @@ function takeShatter(count: number): Shatter {
   const ready = index >= 0 ? shatterPool.splice(index, 1)[0] : null
   if (ready) return ready
   const capacity = Math.max(CHIP_POOL, count)
-  const material = new THREE.MeshStandardMaterial({ roughness: PLASTIC_ROUGHNESS, metalness: PLASTIC_METALNESS })
+  const material = new THREE.MeshStandardMaterial({ roughness: look.roughness, metalness: PLASTIC_METALNESS })
   const mesh = new THREE.InstancedMesh(sharedChipGeometry(), material, capacity)
   mesh.frustumCulled = false
   mesh.castShadow = false
@@ -122,6 +122,7 @@ export function makeShatter(
     material.color.setHex(color)
     material.emissive.setHex(color)
     material.emissiveIntensity = SHATTER.glow
+    material.roughness = look.roughness
   }
   mesh.count = count
   mesh.visible = true

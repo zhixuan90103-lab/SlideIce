@@ -101,18 +101,19 @@ export function watchStageLayout(
 
 /**
  * Screen client coords → design coords.
+ * Pass the stage element's border box. That box already includes the CSS
+ * translate and scale, so the layout offset is not subtracted again.
  * Points outside [0, designW]×[0, designH] are letterbox — ignore for gameplay.
  */
 export function clientToDesign(
   clientX: number,
   clientY: number,
-  layout: StageLayout,
-  stageOriginX = 0,
-  stageOriginY = 0,
+  stageRect: Pick<DOMRect, 'left' | 'top'>,
+  scale: number,
 ): { x: number; y: number } {
   return {
-    x: (clientX - stageOriginX - layout.offsetX) / layout.scale,
-    y: (clientY - stageOriginY - layout.offsetY) / layout.scale,
+    x: (clientX - stageRect.left) / scale,
+    y: (clientY - stageRect.top) / scale,
   };
 }
 
