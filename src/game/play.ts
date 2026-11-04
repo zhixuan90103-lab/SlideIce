@@ -13,14 +13,15 @@ import { mountHint } from './hint'
 import { freshPraise, notePraiseClear, showPraise } from './praise'
 import { SHATTER, disposeShatter, makeShatter, stepShatters, type Shatter } from './shatter'
 import {
-  canLeave,
   followHold,
   gridSnap,
+  planRelease,
   pieceAt,
   releaseFinger,
   rememberFinger,
   seedFinger,
   seedGrab,
+  type AxisLock,
   type Finger,
   type FingerSample,
   type Grab,
@@ -35,9 +36,10 @@ type Gesture = {
   pressX: number
   pressY: number
   samples: FingerSample[]
+  trend: AxisLock | null
 }
 
-type Landing = { piece: StagePiece; x: number; y: number }
+type Landing = { piece: StagePiece; x: number; y: number; leave: boolean; speed: number }
 
 const LAND_SPEED = 900
 
@@ -98,24 +100,33 @@ export function mountSlideGame(
   const inDesign = (x: number, y: number) =>
     x >= 0 && y >= 0 && x <= DESIGN_WIDTH && y <= DESIGN_HEIGHT
 
+  const eliminate = (piece: StagePiece) => {
+    if (landing?.piece === piece) landing = null
+    const { x, y } = piece.anchor.position
+    piece.alive = false
+    piece.mesh.visible = false
+    const burst = makeShatter(scene, chipPoints(piece), x, y, pieceColor(piece))
+    if (burst) shatters.push(burst)
+    showPraise(x, -y, notePraiseClear(praise, 1))
+    if (pieces.every((item) => !item.alive)) ended = true
+  }
+
   const release = (piece: StagePiece) => {
+    const plan = planRelease(piece, pieces, gesture?.trend ?? null, gesture?.samples ?? [])
     if (gesture) releaseFinger(gesture.samples)
     gesture = null
     held = null
     piece.mesh.position.x = 0
     piece.mesh.position.y = 0
-    const { x, y } = piece.anchor.position
-    if (canLeave(piece, pieces)) {
-      if (landing?.piece === piece) landing = null
-      piece.alive = false
-      piece.mesh.visible = false
-      const burst = makeShatter(scene, chipPoints(piece), x, y, pieceColor(piece))
-      if (burst) shatters.push(burst)
-      showPraise(x, -y, notePraiseClear(praise, 1))
-      if (pieces.every((item) => !item.alive)) ended = true
+    if (plan.kind === 'eliminate') {
+      eliminate(piece)
       return
     }
-    landing = { piece, ...gridSnap(piece, pieces) }
+    if (plan.kind === 'slide') {
+      landing = { piece, x: plan.x, y: plan.y, leave: plan.clear, speed: plan.speed }
+      return
+    }
+    landing = { piece, ...gridSnap(piece, pieces), leave: false, speed: LAND_SPEED }
   }
 
   const onDown = (event: PointerEvent) => {
@@ -140,6 +151,7 @@ export function mountSlideGame(
       pressX: point.x,
       pressY: point.y,
       samples: [],
+      trend: null,
     }
     rememberFinger(gesture.samples, event.timeStamp / 1000, point.x, point.y)
   }
@@ -187,7 +199,7 @@ export function mountSlideGame(
     },
     update(dt) {
       if (gesture) {
-        followHold(
+        const fast = followHold(
           gesture.piece,
           pieces,
           gesture.finger,
@@ -197,23 +209,35 @@ export function mountSlideGame(
           gesture.samples,
           performance.now() / 1000,
         )
+        if (fast) gesture.trend = fast
       }
       if (landing && landing.piece !== held && landing.piece.alive) {
         const dx = landing.x - landing.piece.anchor.position.x
         const dy = landing.y - landing.piece.anchor.position.y
         const dist = Math.hypot(dx, dy)
-        const step = LAND_SPEED * dt
+        const step = landing.speed * dt
         if (dist <= step || dist < 0.01) {
           landing.piece.anchor.position.x = landing.x
           landing.piece.anchor.position.y = landing.y
+          const done = landing
           landing = null
+          if (done.leave) eliminate(done.piece)
+          else {
+            const home = gridSnap(done.piece, pieces)
+            if (Math.hypot(home.x - done.piece.anchor.position.x, home.y - done.piece.anchor.position.y) > 0.01) {
+              landing = { piece: done.piece, ...home, leave: false, speed: LAND_SPEED }
+            }
+          }
         } else {
           landing.piece.anchor.position.x += (dx / dist) * step
           landing.piece.anchor.position.y += (dy / dist) * step
         }
       }
       hintTargets.length = 0
-      if (held && canLeave(held, pieces)) hintTargets.push(held.mesh)
+      if (held && gesture) {
+        const plan = planRelease(held, pieces, gesture.trend, gesture.samples)
+        if (plan.kind === 'eliminate' || (plan.kind === 'slide' && plan.clear)) hintTargets.push(held.mesh)
+      }
       hint.set(hintTargets)
     hint.step(dt)
     stepShatters(shatters, -DESIGN_HEIGHT - SHATTER.chip, dt)

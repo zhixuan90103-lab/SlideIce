@@ -4,11 +4,8 @@ import { LEVEL } from './level'
 import {
   BOARD_GRID,
   CELL,
-  BOARD_COLOR,
   BOARD_ROUGHNESS,
   FILL_COLOR,
-  FLOOR_BEVEL,
-  FLOOR_THICK,
   FLOOR_TOP,
   HEMI_GROUND,
   HEMI_SKY,
@@ -18,9 +15,6 @@ import {
   SHADOW_OPACITY,
   SHADOW_Z,
   SKY,
-  TRAY_BEVEL_SIZE,
-  TRAY_LIP,
-  TRAY_MARGIN,
   look,
 } from './look'
 
@@ -126,12 +120,6 @@ export function mountStage(scene: THREE.Scene): StageRig {
   shadowPlane.position.set(DESIGN_WIDTH / 2, -DESIGN_HEIGHT / 2, SHADOW_Z)
   scene.add(shadowPlane)
 
-  const boardMat = new THREE.MeshStandardMaterial({
-    color: BOARD_COLOR,
-    roughness: BOARD_ROUGHNESS,
-    metalness: 0,
-  })
-  boardMat.shadowSide = THREE.BackSide
   const pieceMats = LEVEL.map((piece) => piece.color).map(
     (color) =>
       new THREE.MeshStandardMaterial({
@@ -143,11 +131,7 @@ export function mountStage(scene: THREE.Scene): StageRig {
   )
   for (const material of pieceMats) material.shadowSide = THREE.BackSide
 
-  const floor = new THREE.Mesh(new THREE.BufferGeometry(), boardMat)
-  floor.castShadow = true
-  floor.receiveShadow = true
-  floor.position.set(ORIGIN_X + BOARD / 2, -(ORIGIN_Y + BOARD / 2), floorZ())
-  scene.add(floor, makeGrid())
+  scene.add(makeGrid())
 
   const pieces: StagePiece[] = LEVEL.map((piece, index) => {
     const mesh = new THREE.Mesh(new THREE.BufferGeometry(), pieceMats[index])
@@ -210,8 +194,6 @@ export function mountStage(scene: THREE.Scene): StageRig {
       piece.half = size / 2
       piece.height = size
     }
-    floor.geometry.dispose()
-    floor.geometry = floorGeometry(size, corner, edge)
   }
   placeCube(look.size, look.corner, look.edge)
 
@@ -236,11 +218,6 @@ export function mountStage(scene: THREE.Scene): StageRig {
   }
 }
 
-function floorZ(): number {
-  const depth = FLOOR_THICK - FLOOR_BEVEL * 2
-  return FLOOR_TOP - depth - FLOOR_BEVEL
-}
-
 function softSky(): THREE.CanvasTexture {
   const canvas = document.createElement('canvas')
   canvas.width = 2
@@ -260,7 +237,13 @@ function softSky(): THREE.CanvasTexture {
 function makeGrid(): THREE.Mesh {
   const mesh = new THREE.Mesh(
     new THREE.PlaneGeometry(BOARD, BOARD),
-    new THREE.MeshStandardMaterial({ map: gridTexture(), roughness: BOARD_ROUGHNESS, metalness: 0 }),
+    new THREE.MeshStandardMaterial({
+      map: gridTexture(),
+      roughness: BOARD_ROUGHNESS,
+      metalness: 0,
+      transparent: true,
+      depthWrite: false,
+    }),
   )
   mesh.position.set(ORIGIN_X + BOARD / 2, -(ORIGIN_Y + BOARD / 2), FLOOR_TOP + 0.15)
   mesh.receiveShadow = true
@@ -273,11 +256,10 @@ function gridTexture(): THREE.CanvasTexture {
   canvas.width = size
   canvas.height = size
   const ctx = canvas.getContext('2d')!
-  ctx.fillStyle = '#faf7f3'
-  ctx.fillRect(0, 0, size, size)
+  ctx.clearRect(0, 0, size, size)
   const cell = size / BOARD_GRID
   const gap = (GAP / CELL) * cell
-  ctx.fillStyle = '#f3efe9'
+  ctx.fillStyle = 'rgba(0, 56, 102, 0.25)'
   for (let row = 0; row < BOARD_GRID; row++) {
     for (let col = 0; col < BOARD_GRID; col++) {
       const x = col * cell + gap / 2
@@ -292,49 +274,6 @@ function gridTexture(): THREE.CanvasTexture {
   texture.colorSpace = THREE.SRGBColorSpace
   texture.anisotropy = 8
   return texture
-}
-
-function roundLoop(path: THREE.Path | THREE.Shape, x: number, y: number, w: number, h: number, r: number): void {
-  path.moveTo(x + r, y)
-  path.lineTo(x + w - r, y)
-  path.absarc(x + w - r, y + r, r, -Math.PI / 2, 0, false)
-  path.lineTo(x + w, y + h - r)
-  path.absarc(x + w - r, y + h - r, r, 0, Math.PI / 2, false)
-  path.lineTo(x + r, y + h)
-  path.absarc(x + r, y + h - r, r, Math.PI / 2, Math.PI, false)
-  path.lineTo(x, y + r)
-  path.absarc(x + r, y + r, r, Math.PI, Math.PI * 1.5, false)
-}
-
-function traySpans(size: number, corner: number, edge: number) {
-  const opening = BOARD - (CELL - size) + TRAY_MARGIN * 2
-  const hole = opening + TRAY_BEVEL_SIZE * 2
-  const outer = hole + TRAY_LIP * 2
-  const holeRadius = Math.max(corner, edge) + TRAY_MARGIN + TRAY_BEVEL_SIZE
-  return {
-    hole,
-    outer,
-    holeRadius,
-    outerRadius: holeRadius + TRAY_LIP,
-  }
-}
-
-const FLOOR_BEVEL_SIZE = 2
-
-function floorGeometry(size: number, corner: number, edge: number): THREE.ExtrudeGeometry {
-  const span = traySpans(size, corner, edge)
-  const wallLength = span.outer + TRAY_BEVEL_SIZE * 2
-  const side = wallLength - FLOOR_BEVEL_SIZE * 2
-  const shape = new THREE.Shape()
-  const radius = Math.min(side / 2 - 1, span.outerRadius + TRAY_BEVEL_SIZE - FLOOR_BEVEL_SIZE)
-  roundLoop(shape, -side / 2, -side / 2, side, side, radius)
-  return new THREE.ExtrudeGeometry(shape, {
-    depth: FLOOR_THICK - FLOOR_BEVEL * 2,
-    bevelEnabled: true,
-    bevelThickness: FLOOR_BEVEL,
-    bevelSize: FLOOR_BEVEL_SIZE,
-    bevelSegments: 6,
-  })
 }
 
 function pieceGeometry(

@@ -160,7 +160,7 @@ async function boot(): Promise<void> {
   const native = Capacitor.isNativePlatform();
   const renderer = await createRenderer({ container: stage });
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x79c6f8);
+  scene.background = new THREE.Color(0x005196);
   const pmrem = new THREE.PMREMGenerator(renderer as unknown as THREE.WebGLRenderer);
   scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
   scene.environmentIntensity = 0;
@@ -209,7 +209,7 @@ async function boot(): Promise<void> {
   const fps = mountFps();
   game = mountSlideGame(scene, stage, () => latestLayout);
   look.topZ = game.setPieceHeight(40);
-  look.pitch = -15;
+  look.pitch = -5;
   applyCamera(camera);
   mountLookTune(camera, game);
   game.setLights(look.key, look.keyAz, look.keyEl, look.fill, look.fillAz, look.fillEl, look.ambient);

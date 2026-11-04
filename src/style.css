@@ -5,7 +5,7 @@
   --design-w: 390;
   --design-h: 844;
   --shell-bg: #12141c;
-  --stage-bg: #79c6f8;
+  --stage-bg: #005196;
 
   /* Desktop sim; native overrides with env() */
   --safe-top: 59px;

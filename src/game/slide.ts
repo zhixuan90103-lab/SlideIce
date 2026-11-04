@@ -9,11 +9,12 @@ import { boardRect, nearestCellCenter, type StagePiece } from './stage'
 
 /** How far the followed point stays behind the latest finger sample, so a segment can be drawn. */
 const LINE_DELAY = 0.02
-/** Speed over the recent window, after the stroke is at least this long. */
-export const FAST_SPEED = 2200
+/** At FAST_SPEED the stroke must reach FAST_MIN. Faster swipes need less distance, down to FAST_FLOOR. */
+export const FAST_SPEED = 900
 export const FAST_WINDOW = 0.08
 export const FAST_SPAN = 0.05
 export const FAST_MIN = 28
+const FAST_FLOOR = 8
 /** Share of the stroke that must point along an open exit before that exit wins. */
 const TREND = 0.6
 
@@ -135,14 +136,15 @@ export function followHold(
   pressY: number,
   samples: readonly FingerSample[],
   now: number,
-): void {
+): AxisLock | null {
+  const fast = fastAxis(piece, pieces, pressX, pressY, samples)
   const at = fingerOnLine(samples, now)
-  if (samples.length === 0 || (at.x === finger.x && at.y === finger.y)) return
+  if (samples.length === 0 || (at.x === finger.x && at.y === finger.y)) return fast
   finger.x = at.x
   finger.y = at.y
-  const fast = fastAxis(piece, pieces, finger, pressX, pressY, samples)
   const step = grabDelta(grab, finger, piece.anchor.position.x, piece.anchor.position.y, fast?.axis ?? null)
   followFinger(piece, step.x, step.y, pieces)
+  return fast
 }
 
 export function followFinger(piece: StagePiece, dx: number, dy: number, pieces: readonly StagePiece[]): void {
@@ -175,7 +177,6 @@ export type AxisLock = { axis: 'x' | 'y'; sign: number }
 export function fastAxis(
   piece: StagePiece,
   pieces: readonly StagePiece[],
-  finger: Finger,
   pressX: number,
   pressY: number,
   samples: readonly FingerSample[],
@@ -185,9 +186,44 @@ export function fastAxis(
   if (!first || !last || first === last) return null
   const span = last.t - first.t
   const recent = Math.hypot(last.x - first.x, last.y - first.y)
-  const stroke = Math.hypot(finger.x - pressX, finger.y - pressY)
-  if (span < FAST_SPAN || recent / span < FAST_SPEED || stroke < FAST_MIN) return null
+  const stroke = Math.hypot(last.x - pressX, last.y - pressY)
+  const speed = span > 0 ? recent / span : 0
+  const need = Math.max(FAST_FLOOR, FAST_MIN * (FAST_SPEED / Math.max(speed, 1)))
+  if (span < FAST_SPAN || speed < FAST_SPEED || stroke < need) return null
   return chooseFastAxis(piece, last.x - first.x, -(last.y - first.y), pieces)
+}
+
+/** Speed of the samples still in the recent window. */
+export function windowSpeed(samples: readonly FingerSample[]): number {
+  const first = samples[0]
+  const last = samples[samples.length - 1]
+  if (!first || !last || last.t <= first.t) return 0
+  return Math.hypot(last.x - first.x, last.y - first.y) / (last.t - first.t)
+}
+
+export type ReleasePlan =
+  | { kind: 'eliminate' }
+  | { kind: 'slide'; x: number; y: number; clear: boolean; speed: number }
+  | { kind: 'snap' }
+
+/**
+ * Already out of range eliminates at once.
+ * A piece still on the board slides on only while the recent window is still fast.
+ * Anything else returns to a cell.
+ */
+export function planRelease(
+  piece: StagePiece,
+  pieces: readonly StagePiece[],
+  trend: AxisLock | null,
+  samples: readonly FingerSample[],
+): ReleasePlan {
+  if (canLeave(piece, pieces)) return { kind: 'eliminate' }
+  const speed = windowSpeed(samples)
+  if (!trend || speed < FAST_SPEED) return { kind: 'snap' }
+  const slide = slideAlong(piece, pieces, trend)
+  const dist = Math.hypot(slide.x - piece.anchor.position.x, slide.y - piece.anchor.position.y)
+  if (dist <= 0.01) return { kind: 'snap' }
+  return { kind: 'slide', x: slide.x, y: slide.y, clear: slide.clear, speed }
 }
 
 /** Longer axis of this segment, unless the segment trends along an open exit. */
@@ -413,6 +449,26 @@ function crossedSides(piece: StagePiece, x: number, y: number): readonly AxisLoc
   if (north) crossed.push(unlockWays[2])
   if (south) crossed.push(unlockWays[3])
   return crossed
+}
+
+/**
+ * Where a formed trend ends. `clear` means every cube can pass the board edge
+ * without touching another piece. Otherwise the point is the first contact.
+ */
+export function slideAlong(
+  piece: StagePiece,
+  pieces: readonly StagePiece[],
+  side: AxisLock,
+): { x: number; y: number; clear: boolean } {
+  const ox = piece.anchor.position.x
+  const oy = piece.anchor.position.y
+  const dist = exitDistance(piece, ox, oy, side)
+  const dx = side.axis === 'x' ? side.sign * dist : 0
+  const dy = side.axis === 'y' ? side.sign * dist : 0
+  if (dist <= 0.01) return { x: ox, y: oy, clear: true }
+  const stop = sweepStop(piece, ox, oy, dx, dy, aliveOthers(pieces, piece))
+  const scale = stop >= 1 ? 1 : Math.max(0, stop - 1e-4)
+  return { x: ox + dx * scale, y: oy + dy * scale, clear: stop >= 1 }
 }
 
 /** Distance along a signed axis until every visible cube is past that edge. */

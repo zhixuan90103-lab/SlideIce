@@ -34,7 +34,7 @@ export function frameDistance(cubeSize: number): number {
 
 export const look = {
   topZ: 42,
-  pitch: -15,
+  pitch: -5,
   yaw: 0,
   dist: frameDistance(60),
   key: 0.85,
@@ -50,7 +50,7 @@ export const look = {
   roughness: 0.42,
 }
 
-export const SKY = ['#4aa8ee', '#79c6f8', '#9ed8fb'] as const
+export const SKY = ['#004f8f', '#005196', '#00609c'] as const
 export const BOARD_COLOR = 0xfaf7f3
 export const BOARD_ROUGHNESS = 0.62
 export const PLASTIC_ROUGHNESS = 0.42
