@@ -10,12 +10,21 @@ export type LevelPiece = {
   cells: readonly Cell[]
 }
 
-/** Purple and pink use the red/blue softness: same hues, saturation 0.65, lightness 0.62. */
+/** Piece colors on the cream stage. */
+export const PIECE_COLOR = {
+  红: 0xe06b66,
+  蓝: 0x3d9ee6,
+  绿: 0x5ec49a,
+  黄: 0xf0cc62,
+  紫: 0xb09ad8,
+  粉: 0xf0b4a6,
+} as const
+
 export const LEVEL: readonly LevelPiece[] = [
-  { id: '红', color: 0xda5a72, cells: [[0, 0], [1, 0], [2, 0], [0, 1]] },
-  { id: '蓝', color: 0x61b3df, cells: [[3, 0], [4, 0], [4, 1], [4, 2]] },
-  { id: '绿', color: 0x74bb50, cells: [[1, 1], [2, 1], [3, 1], [2, 2]] },
-  { id: '黄', color: 0xffdf7e, cells: [[0, 2], [1, 2], [0, 3], [0, 4], [1, 4]] },
-  { id: '紫', color: 0xbf5edd, cells: [[1, 3], [2, 3], [2, 4], [3, 4]] },
-  { id: '粉', color: 0xdd6e5e, cells: [[3, 2], [3, 3], [4, 3], [4, 4]] },
+  { id: '红', color: PIECE_COLOR.红, cells: [[0, 0], [1, 0], [2, 0], [0, 1]] },
+  { id: '蓝', color: PIECE_COLOR.蓝, cells: [[3, 0], [4, 0], [4, 1], [4, 2]] },
+  { id: '绿', color: PIECE_COLOR.绿, cells: [[1, 1], [2, 1], [3, 1], [2, 2]] },
+  { id: '黄', color: PIECE_COLOR.黄, cells: [[0, 2], [1, 2], [0, 3], [0, 4], [1, 4]] },
+  { id: '紫', color: PIECE_COLOR.紫, cells: [[1, 3], [2, 3], [2, 4], [3, 4]] },
+  { id: '粉', color: PIECE_COLOR.粉, cells: [[3, 2], [3, 3], [4, 3], [4, 4]] },
 ]

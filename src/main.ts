@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { Capacitor } from '@capacitor/core';
-import { FRAME_DIST, frameDistance, look } from './game/look';
+import { FRAME_DIST, STAGE_BG, STAGE_BG_CSS, frameDistance, look } from './game/look';
 import { mountSlideGame, type SlideGame } from './game/play';
 import {
   DESIGN_HEIGHT,
@@ -160,7 +160,8 @@ async function boot(): Promise<void> {
   const native = Capacitor.isNativePlatform();
   const renderer = await createRenderer({ container: stage });
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x7fa5bf);
+  document.documentElement.style.setProperty('--stage-bg', STAGE_BG_CSS);
+  scene.background = new THREE.Color(STAGE_BG);
   const pmrem = new THREE.PMREMGenerator(renderer as unknown as THREE.WebGLRenderer);
   scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
   scene.environmentIntensity = 0;

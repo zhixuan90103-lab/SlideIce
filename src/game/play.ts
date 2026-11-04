@@ -306,18 +306,15 @@ const chips: { x: number; y: number }[] = []
 function chipPoints(piece: StagePiece): { x: number; y: number }[] {
   for (let i = 0; i < chips.length; i++) chipPool.push(chips[i])
   chips.length = 0
-  const step = SHATTER.step
   for (const local of piece.locals) {
     const x0 = piece.anchor.position.x + local.x - piece.half
     const y0 = piece.anchor.position.y + local.y - piece.half
     const side = piece.half * 2
-    const count = Math.max(1, Math.round(side / step))
-    for (let col = 0; col < count; col++) {
-      for (let row = 0; row < count; row++) {
-        if ((col + row) % 2 !== 0) continue
+    for (let col = 0; col < SHATTER.cols; col++) {
+      for (let row = 0; row < SHATTER.rows; row++) {
         const point = chipPool.pop() ?? { x: 0, y: 0 }
-        point.x = x0 + ((col + 0.5) * side) / count
-        point.y = y0 + ((row + 0.5) * side) / count
+        point.x = x0 + ((col + 0.5) * side) / SHATTER.cols
+        point.y = y0 + ((row + 0.5) * side) / SHATTER.rows
         chips.push(point)
       }
     }

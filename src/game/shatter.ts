@@ -1,23 +1,26 @@
 /**
- * Leave-board shatter, matched to Ring's unlock chips.
- * Ring's world is 10 units tall for 844px. These numbers are that look in design pixels.
+ * Leave-board chips.
+ * `chip`, `depth`, and `bevel` are design pixels.
+ * Flight distances use the Ring scale: 844px is 10 units.
+ * Each cell spawns `cols` × `rows` chips.
  */
 
 import * as THREE from 'three'
 import { PLASTIC_METALNESS, PLASTIC_ROUGHNESS } from './look'
 
-const UNIT = 844 / 10
+const RING = 844 / 10
 
 export const SHATTER = {
-  chip: 0.25 * UNIT,
-  step: 0.16 * UNIT,
-  depth: 0.22 * UNIT,
-  bevel: 0.04 * UNIT,
-  scaleMin: 0.55,
-  scaleSpan: 0.6,
-  speedMax: 1.6 * UNIT,
-  lead: 0.16 * UNIT,
-  gravity: -30 * UNIT,
+  chip: 21.1,
+  cols: 3,
+  rows: 2,
+  depth: 18.568,
+  bevel: 3.376,
+  scaleMin: 0.78,
+  scaleSpan: 0.14,
+  speedMax: 1.6 * RING,
+  lead: 0.16 * RING,
+  gravity: -30 * RING,
   gravityIn: 0.12,
   shrinkSeconds: 0.75,
   shrinkFloor: 0.45,

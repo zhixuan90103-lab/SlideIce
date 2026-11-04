@@ -5,7 +5,7 @@
   --design-w: 390;
   --design-h: 844;
   --shell-bg: #12141c;
-  --stage-bg: #7fa5bf;
+  --stage-bg: #f6ead8; /* first paint; boot sets this from STAGE_BG */
 
   /* Desktop sim; native overrides with env() */
   --safe-top: 59px;

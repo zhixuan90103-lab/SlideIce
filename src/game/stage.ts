@@ -14,6 +14,7 @@ import {
   PLASTIC_ROUGHNESS,
   SHADOW_OPACITY,
   SHADOW_Z,
+  STAGE_BG,
   look,
 } from './look'
 
@@ -110,7 +111,7 @@ export function mountStage(scene: THREE.Scene): StageRig {
   placeLight(key, look.keyAz, look.keyEl)
   placeLight(fill, look.fillAz, look.fillEl)
 
-  scene.background = new THREE.Color(0x7fa5bf)
+  scene.background = new THREE.Color(STAGE_BG)
   const shadowPlane = new THREE.Mesh(
     new THREE.PlaneGeometry(DESIGN_WIDTH + 800, DESIGN_HEIGHT + 800),
     new THREE.ShadowMaterial({ opacity: SHADOW_OPACITY }),
@@ -242,7 +243,7 @@ function gridTexture(): THREE.CanvasTexture {
   ctx.clearRect(0, 0, size, size)
   const cell = size / BOARD_GRID
   const gap = (GAP / CELL) * cell
-  ctx.fillStyle = 'rgba(0, 56, 102, 0.25)'
+  ctx.fillStyle = 'rgba(150, 110, 72, 0.14)'
   for (let row = 0; row < BOARD_GRID; row++) {
     for (let col = 0; col < BOARD_GRID; col++) {
       const x = col * cell + gap / 2

@@ -45,15 +45,19 @@ export const look = {
   fillEl: 57,
   ambient: 1.1,
   size: 60,
-  corner: 5,
-  edge: 8,
+  corner: 16,
+  edge: 4,
   roughness: 0.59,
 }
 
 export const BOARD_COLOR = 0xfaf7f3
 export const BOARD_ROUGHNESS = 0.62
-export const PLASTIC_ROUGHNESS = 0.59
+export const PLASTIC_ROUGHNESS = look.roughness
 export const PLASTIC_METALNESS = 0.02
+
+/** Stage fill. CSS `--stage-bg` is set from this at boot. */
+export const STAGE_BG = 0xf6ead8
+export const STAGE_BG_CSS = '#f6ead8'
 
 export const HEMI_SKY = 0xfff8f2
 export const HEMI_GROUND = 0xf3d7be
