@@ -314,6 +314,7 @@ function chipPoints(piece: StagePiece): { x: number; y: number }[] {
     const count = Math.max(1, Math.round(side / step))
     for (let col = 0; col < count; col++) {
       for (let row = 0; row < count; row++) {
+        if ((col + row) % 2 !== 0) continue
         const point = chipPool.pop() ?? { x: 0, y: 0 }
         point.x = x0 + ((col + 0.5) * side) / count
         point.y = y0 + ((row + 0.5) * side) / count

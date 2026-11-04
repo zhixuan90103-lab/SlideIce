@@ -37,22 +37,22 @@ export const look = {
   pitch: -5,
   yaw: 0,
   dist: frameDistance(60),
-  key: 0.85,
+  key: 1.3,
   keyAz: -30,
   keyEl: 80,
   fill: 0.28,
   fillAz: -101,
   fillEl: 57,
-  ambient: 1.55,
+  ambient: 1.1,
   size: 60,
   corner: 5,
   edge: 8,
-  roughness: 0.42,
+  roughness: 0.59,
 }
 
 export const BOARD_COLOR = 0xfaf7f3
 export const BOARD_ROUGHNESS = 0.62
-export const PLASTIC_ROUGHNESS = 0.42
+export const PLASTIC_ROUGHNESS = 0.59
 export const PLASTIC_METALNESS = 0.02
 
 export const HEMI_SKY = 0xfff8f2

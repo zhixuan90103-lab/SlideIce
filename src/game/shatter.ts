@@ -4,14 +4,15 @@
  */
 
 import * as THREE from 'three'
+import { PLASTIC_METALNESS, PLASTIC_ROUGHNESS } from './look'
 
 const UNIT = 844 / 10
 
 export const SHATTER = {
-  chip: 0.1 * UNIT,
+  chip: 0.25 * UNIT,
   step: 0.16 * UNIT,
-  depth: 0.1 * UNIT,
-  bevel: 0.018 * UNIT,
+  depth: 0.22 * UNIT,
+  bevel: 0.04 * UNIT,
   scaleMin: 0.55,
   scaleSpan: 0.6,
   speedMax: 1.6 * UNIT,
@@ -80,7 +81,7 @@ function takeShatter(count: number): Shatter {
   const ready = index >= 0 ? shatterPool.splice(index, 1)[0] : null
   if (ready) return ready
   const capacity = Math.max(CHIP_POOL, count)
-  const material = new THREE.MeshStandardMaterial({ roughness: 0.42, metalness: 0.02 })
+  const material = new THREE.MeshStandardMaterial({ roughness: PLASTIC_ROUGHNESS, metalness: PLASTIC_METALNESS })
   const mesh = new THREE.InstancedMesh(sharedChipGeometry(), material, capacity)
   mesh.frustumCulled = false
   mesh.castShadow = false

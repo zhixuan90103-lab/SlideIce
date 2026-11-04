@@ -160,7 +160,7 @@ async function boot(): Promise<void> {
   const native = Capacitor.isNativePlatform();
   const renderer = await createRenderer({ container: stage });
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x1b3350);
+  scene.background = new THREE.Color(0x7fa5bf);
   const pmrem = new THREE.PMREMGenerator(renderer as unknown as THREE.WebGLRenderer);
   scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
   scene.environmentIntensity = 0;

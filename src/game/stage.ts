@@ -1,5 +1,4 @@
 import * as THREE from 'three'
-import skyUrl from '../assets/sky.png'
 import { DESIGN_HEIGHT, DESIGN_WIDTH } from '../adapt/design'
 import { LEVEL } from './level'
 import {
@@ -111,7 +110,7 @@ export function mountStage(scene: THREE.Scene): StageRig {
   placeLight(key, look.keyAz, look.keyEl)
   placeLight(fill, look.fillAz, look.fillEl)
 
-  scene.background = skyTexture()
+  scene.background = new THREE.Color(0x7fa5bf)
   const shadowPlane = new THREE.Mesh(
     new THREE.PlaneGeometry(DESIGN_WIDTH + 800, DESIGN_HEIGHT + 800),
     new THREE.ShadowMaterial({ opacity: SHADOW_OPACITY }),
@@ -216,12 +215,6 @@ export function mountStage(scene: THREE.Scene): StageRig {
       for (const material of pieceMats) material.roughness = value
     },
   }
-}
-
-function skyTexture(): THREE.Texture {
-  const texture = new THREE.TextureLoader().load(skyUrl)
-  texture.colorSpace = THREE.SRGBColorSpace
-  return texture
 }
 
 function makeGrid(): THREE.Mesh {
