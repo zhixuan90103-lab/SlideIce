@@ -3,7 +3,7 @@
  *   world x = design x
  *   world y = -design y
  * A press lifts the piece at once. The piece stays put inside the design-space dead zone,
- * then moves on the one locked axis.
+ * then moves on the one locked axis. Returning inside the home band clears that lock.
  * Release removes a piece that can finish leaving, and lands every other piece on cells.
  */
 
@@ -14,9 +14,13 @@ import { beginRecoil, stepRecoil, wobbleOffset, type Recoil } from './recoil'
 import { freshPraise, notePraiseClear, showPraise } from './praise'
 import { SHATTER, disposeShatter, makeShatter, stepShatters, type Shatter } from './shatter'
 import {
+  HOME_BAND,
   followHold,
+  pieceAhead,
+  recentAxis,
   gridSnap,
   planRelease,
+  coversPiece,
   pieceAt,
   releaseFinger,
   rememberFinger,
@@ -29,16 +33,19 @@ import { mountStage, type StagePiece } from './stage'
 
 type Gesture = {
   id: number
-  piece: StagePiece
+  piece: StagePiece | null
   finger: Finger
   pressX: number
   pressY: number
   originX: number
   originY: number
+  /** Finger position when this piece was taken. Mid-stroke grabs measure travel from here. */
+  grabX: number
+  grabY: number
+  /** Taken on the press itself, so the dead zone still applies. */
+  fromPress: boolean
   samples: FingerSample[]
   trend: AxisLock | null
-  /** Still pressed into the piece that stopped this drag. One wobble per contact. */
-  bumping: boolean
 }
 
 type Landing = {
@@ -47,8 +54,8 @@ type Landing = {
   y: number
   leave: boolean
   speed: number
-  /** Slide that stops on another piece. The wobble plays once, on arrival. */
-  bump: { axis: 'x' | 'y'; sign: number } | null
+  /** Set when this landing is the one that sits the piece on a cell. */
+  settle: AxisLock | null
 }
 
 const LAND_SPEED = 900
@@ -127,12 +134,51 @@ export function mountSlideGame(
     if (next) recoils.set(piece, next)
   }
 
-  const release = (piece: StagePiece) => {
-    const plan = planRelease(piece, pieces, gesture?.trend ?? null, gesture?.samples ?? [])
-    const trend = gesture?.trend ?? null
+  const endGesture = () => {
     if (gesture) releaseFinger(gesture.samples)
     gesture = null
     held = null
+  }
+
+  const takePiece = (piece: StagePiece, fingerX: number, fingerY: number, fromPress: boolean) => {
+    if (!gesture) return
+    gesture.piece = piece
+    gesture.originX = piece.anchor.position.x
+    gesture.originY = piece.anchor.position.y
+    gesture.grabX = fingerX
+    gesture.grabY = fingerY
+    gesture.fromPress = fromPress
+    held = piece
+  }
+
+  /** Recent trend turned. Later travel starts at this finger, so the old cross slack is not applied. */
+  const turnAxis = (piece: StagePiece, next: AxisLock) => {
+    if (!gesture) return
+    gesture.trend = next
+    gesture.fromPress = false
+    gesture.originX = piece.anchor.position.x
+    gesture.originY = piece.anchor.position.y
+    gesture.grabX = gesture.finger.x
+    gesture.grabY = gesture.finger.y
+  }
+
+  /** Pushing into a stop keeps the grab. Only a finger behind the piece lets go. */
+  const stillHeld = (piece: StagePiece, finger: Finger, axis: AxisLock) => {
+    if (coversPiece(piece, finger.x, finger.y)) return true
+    const pieceAlong = axis.axis === 'x' ? piece.anchor.position.x : piece.anchor.position.y
+    const fingerAlong = axis.axis === 'x' ? finger.x : -finger.y
+    return (fingerAlong - pieceAlong) * axis.sign >= 0
+  }
+
+  const sit = (piece: StagePiece, force: AxisLock | null) => {
+    const home = gridSnap(piece, pieces)
+    landing = { piece, x: home.x, y: home.y, leave: false, speed: LAND_SPEED, settle: force }
+  }
+
+  const release = (piece: StagePiece) => {
+    const plan = planRelease(piece, pieces, gesture?.trend ?? null, gesture?.samples ?? [])
+    const trend = gesture?.trend ?? null
+    endGesture()
     if (plan.kind === 'eliminate') {
       recoils.delete(piece)
       piece.mesh.position.x = 0
@@ -141,11 +187,11 @@ export function mountSlideGame(
       return
     }
     if (plan.kind === 'slide') {
-      const hit = !plan.clear && trend ? { axis: trend.axis, sign: trend.sign } : null
-      landing = { piece, x: plan.x, y: plan.y, leave: plan.clear, speed: plan.speed, bump: hit }
+      landing = { piece, x: plan.x, y: plan.y, leave: plan.clear, speed: plan.speed, settle: null }
+      if (!plan.clear) landing.settle = trend
       return
     }
-    landing = { piece, ...gridSnap(piece, pieces), leave: false, speed: LAND_SPEED, bump: null }
+    sit(piece, trend)
   }
 
   const onDown = (event: PointerEvent) => {
@@ -155,25 +201,27 @@ export function mountSlideGame(
     // A new press after a missed pointerup takes over, so the next piece is not lost.
     if (gesture && gesture.id !== event.pointerId && stage.hasPointerCapture(gesture.id)) return
     if (landing) landing = null
-    if (gesture) release(gesture.piece)
+    if (gesture?.piece) release(gesture.piece)
+    else if (gesture) endGesture()
     const point = designOf(event)
     if (!point || !inDesign(point.x, point.y)) return
     const hit = pieceAt(point.x, point.y, pieces)
-    if (!hit) return
     stage.setPointerCapture(event.pointerId)
-    held = hit
     gesture = {
       id: event.pointerId,
-      piece: hit,
+      piece: null,
       finger: seedFinger(point.x, point.y),
       pressX: point.x,
       pressY: point.y,
-      originX: hit.anchor.position.x,
-      originY: hit.anchor.position.y,
+      originX: 0,
+      originY: 0,
+      grabX: point.x,
+      grabY: point.y,
+      fromPress: false,
       samples: [],
       trend: null,
-      bumping: false,
     }
+    if (hit) takePiece(hit, point.x, point.y, true)
     rememberFinger(gesture.samples, event.timeStamp / 1000, point.x, point.y)
   }
 
@@ -190,13 +238,15 @@ export function mountSlideGame(
   const onUp = (event: PointerEvent) => {
     if (!gesture || event.pointerId !== gesture.id) return
     const piece = gesture.piece
-    release(piece)
+    if (piece) release(piece)
+    else endGesture()
     if (stage.hasPointerCapture(event.pointerId)) stage.releasePointerCapture(event.pointerId)
   }
 
   const onLostCapture = (event: PointerEvent) => {
     if (!gesture || event.pointerId !== gesture.id) return
-    release(gesture.piece)
+    if (gesture.piece) release(gesture.piece)
+    else endGesture()
   }
 
   stage.addEventListener('pointerdown', onDown)
@@ -228,15 +278,45 @@ export function mountSlideGame(
           gesture.pressY,
           gesture.originX,
           gesture.originY,
+          gesture.grabX,
+          gesture.grabY,
+          gesture.fromPress,
           gesture.samples,
           gesture.trend,
         )
         if (moved.axis) gesture.trend = moved.axis
-        if (moved.blocked && !gesture.bumping && moved.axis) {
-          bump(gesture.piece, moved.axis.axis, moved.axis.sign)
-          gesture.bumping = true
+        const piece = gesture.piece
+        if (piece && gesture.trend) {
+          const turned = recentAxis(gesture.samples, gesture.trend.axis)
+          const along =
+            gesture.trend.axis === 'x'
+              ? piece.anchor.position.x - gesture.originX
+              : piece.anchor.position.y - gesture.originY
+          if (turned && (Math.abs(along) <= HOME_BAND || moved.blocked)) turnAxis(piece, turned)
         }
-        if (!moved.blocked) gesture.bumping = false
+        const ahead = piece && gesture.trend ? pieceAhead(piece, pieces, gesture.trend) : null
+        const onAhead =
+          !!ahead &&
+          ahead !== landing?.piece &&
+          !coversPiece(piece!, gesture.finger.x, gesture.finger.y) &&
+          coversPiece(ahead, gesture.finger.x, gesture.finger.y)
+        if (piece && onAhead && ahead) {
+          const dropped = piece
+          const force = gesture.trend
+          gesture.piece = null
+          held = null
+          sit(dropped, force)
+          takePiece(ahead, gesture.finger.x, gesture.finger.y, false)
+        } else if (piece && moved.blocked && moved.axis && !stillHeld(piece, gesture.finger, moved.axis)) {
+          const dropped = piece
+          const force = gesture.trend
+          gesture.piece = null
+          held = null
+          sit(dropped, force)
+        } else if (!gesture.piece) {
+          const under = pieceAt(gesture.finger.x, gesture.finger.y, pieces)
+          if (under && under !== landing?.piece) takePiece(under, gesture.finger.x, gesture.finger.y, false)
+        }
       }
       if (landing && landing.piece !== held && landing.piece.alive) {
         const dx = landing.x - landing.piece.anchor.position.x
@@ -248,13 +328,12 @@ export function mountSlideGame(
           landing.piece.anchor.position.y = landing.y
           const done = landing
           landing = null
-          if (done.bump) bump(done.piece, done.bump.axis, done.bump.sign)
           if (done.leave) eliminate(done.piece)
           else {
             const home = gridSnap(done.piece, pieces)
             if (Math.hypot(home.x - done.piece.anchor.position.x, home.y - done.piece.anchor.position.y) > 0.01) {
-              landing = { piece: done.piece, ...home, leave: false, speed: LAND_SPEED, bump: null }
-            }
+              landing = { piece: done.piece, x: home.x, y: home.y, leave: false, speed: LAND_SPEED, settle: done.settle }
+            } else if (done.settle) bump(done.piece, done.settle.axis, done.settle.sign)
           }
         } else {
           landing.piece.anchor.position.x += (dx / dist) * step
