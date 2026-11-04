@@ -1,24 +1,83 @@
 /** Settled stage defaults. The settings panel mutates this object. */
 
-import { GRID } from './level'
+import { DESIGN_HEIGHT, DESIGN_WIDTH } from '../adapt/design'
+import { boardSize } from './level'
 
-/** One board size. Occupancy in `level.ts` and the drawn grid both use `GRID`. */
+/** Cell pitch. The live column and row counts come from the open level. */
 export const CELL = 64
 
 /**
- * Camera distance that framed the board across the 390-wide stage.
- * A larger block uses a longer distance so the board's screen margin stays put.
+ * Camera distance that frames a 5-wide board across the 390-wide stage.
+ * Smaller boards keep this cell size. Larger boards move back.
  */
 export const FRAME_DIST = 1200
-const FRAME_CUBE = 60
+/** Saved per level as `dist`. The settings slider uses the same range. */
+export const DIST_MIN = 400
+export const DIST_MAX = 4000
 
-/** Width of the board when each block face is `cubeSize` design pixels. */
-export function boardExtent(cubeSize: number): number {
-  return GRID * CELL - (CELL - cubeSize)
+function clampDist(value: number): number {
+  const next = Math.round(value)
+  if (!Number.isFinite(next)) return FRAME_DIST
+  return Math.min(DIST_MAX, Math.max(DIST_MIN, next))
+}
+const FRAME_CUBE = 60
+const FRAME_SPAN = 5
+/**
+ * Top and bottom reserve, design px. The side reserve is the leftover of a
+ * 5-wide board on the 390 stage (~37). Reusing that band vertically lets a
+ * 12-row board fill the screen, so its cells jump back to the 5-column size.
+ */
+const FRAME_MARGIN_Y = 96
+
+/** Face-to-face size of one side of the board, in design pixels. */
+function faceSpan(cells: number, cubeSize: number): number {
+  return cells * CELL - (CELL - cubeSize)
 }
 
 export function frameDistance(cubeSize: number): number {
-  return (FRAME_DIST * boardExtent(cubeSize)) / boardExtent(FRAME_CUBE)
+  const { cols, rows } = boardSize()
+  const marginX = (DESIGN_WIDTH - faceSpan(FRAME_SPAN, FRAME_CUBE)) / 2
+  const fitW = DESIGN_WIDTH - marginX * 2
+  const fitH = DESIGN_HEIGHT - FRAME_MARGIN_Y * 2
+  const fit = Math.min(fitW / faceSpan(cols, cubeSize), fitH / faceSpan(rows, cubeSize))
+  const scale = Math.min(1, fit)
+  return FRAME_DIST / scale
+}
+
+/**
+ * Stage point → board point. The camera pulls back for a larger board, so a finger
+ * on the picture is farther from the stage center than the raw design coordinate.
+ */
+export function designToBoard(x: number, y: number): { x: number; y: number } {
+  const zoom = look.dist / FRAME_DIST
+  return {
+    x: DESIGN_WIDTH / 2 + (x - DESIGN_WIDTH / 2) * zoom,
+    y: DESIGN_HEIGHT / 2 + (y - DESIGN_HEIGHT / 2) * zoom,
+  }
+}
+
+/** Board point → stage pixel. Inverse of `designToBoard`. */
+export function boardToStage(x: number, y: number): { x: number; y: number } {
+  const zoom = FRAME_DIST / look.dist
+  return {
+    x: DESIGN_WIDTH / 2 + (x - DESIGN_WIDTH / 2) * zoom,
+    y: DESIGN_HEIGHT / 2 + (y - DESIGN_HEIGHT / 2) * zoom,
+  }
+}
+
+/** World y of the bottom edge of the picture at the board plane. */
+export function viewBottomWorld(): number {
+  return -designToBoard(DESIGN_WIDTH / 2, DESIGN_HEIGHT).y
+}
+
+/**
+ * The open level's camera distance. A saved `dist` wins. Otherwise the board
+ * is framed at `FRAME_DIST`, pulled back only enough to keep the side margin
+ * and `FRAME_MARGIN_Y`. Call after `useBoard`.
+ */
+export function openDistance(dist: number | undefined): number {
+  look.dist = clampDist(dist ?? frameDistance(look.size))
+  return look.dist
 }
 
 export const look = {

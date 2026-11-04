@@ -1,6 +1,7 @@
 import * as THREE from 'three'
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import { DESIGN_HEIGHT, DESIGN_WIDTH } from '../adapt/design'
-import { GRID, LEVEL } from './level'
+import { boardSize, useBoard, type LevelFile, type LevelPiece } from './level'
 import {
   CELL,
   BOARD_ROUGHNESS,
@@ -19,9 +20,22 @@ import {
 const GAP = 4
 /** How far the silhouette shell sits outside the piece, in design pixels. */
 const OUTLINE = 4
-const BOARD = GRID * CELL
-const ORIGIN_X = (DESIGN_WIDTH - BOARD) / 2
-const ORIGIN_Y = (DESIGN_HEIGHT - BOARD) / 2
+
+function boardWidth(): number {
+  return boardSize().cols * CELL
+}
+
+function boardHeight(): number {
+  return boardSize().rows * CELL
+}
+
+function originX(): number {
+  return (DESIGN_WIDTH - boardWidth()) / 2
+}
+
+function originY(): number {
+  return (DESIGN_HEIGHT - boardHeight()) / 2
+}
 
 export type StagePiece = {
   /** Logical pose. Collision and release read this, never the bump. */
@@ -51,11 +65,19 @@ export type StageRig = {
   ): void
   setCube(size: number, corner: number, edge: number): void
   setRoughness(roughness: number): void
+  /** Drop the drawn pieces and grid, then build this level. */
+  load(level: LevelFile): void
+  dispose(): void
 }
 
 /** Current level board. World x right, world y up. The size follows the drawn grid, not a fixed 5×5. */
 export function boardRect(): { minX: number; maxX: number; minY: number; maxY: number } {
-  return { minX: ORIGIN_X, maxX: ORIGIN_X + BOARD, minY: -(ORIGIN_Y + BOARD), maxY: -ORIGIN_Y }
+  return {
+    minX: originX(),
+    maxX: originX() + boardWidth(),
+    minY: -(originY() + boardHeight()),
+    maxY: -originY(),
+  }
 }
 
 /** Piece center is inside the current level board. */
@@ -67,15 +89,15 @@ export function centerInGrid(x: number, y: number): boolean {
 /** Lattice cell containing a world point. The lattice continues past the board. */
 export function cellOf(worldX: number, worldY: number): { col: number; row: number } {
   return {
-    col: Math.round((worldX - ORIGIN_X) / CELL - 0.5),
-    row: Math.round((-worldY - ORIGIN_Y) / CELL - 0.5),
+    col: Math.round((worldX - originX()) / CELL - 0.5),
+    row: Math.round((-worldY - originY()) / CELL - 0.5),
   }
 }
 
 export function cellCenter(col: number, row: number): { x: number; y: number } {
   return {
-    x: ORIGIN_X + (col + 0.5) * CELL,
-    y: -(ORIGIN_Y + (row + 0.5) * CELL),
+    x: originX() + (col + 0.5) * CELL,
+    y: -(originY() + (row + 0.5) * CELL),
   }
 }
 
@@ -86,7 +108,8 @@ export function nearestCellCenter(x: number, y: number): { x: number; y: number 
 }
 
 export function cellInside(col: number, row: number): boolean {
-  return col >= 0 && row >= 0 && col < GRID && row < GRID
+  const { cols, rows } = boardSize()
+  return col >= 0 && row >= 0 && col < cols && row < rows
 }
 
 /** Every cube of the piece sits on a cell of this level. */
@@ -202,59 +225,28 @@ export function mountStage(scene: THREE.Scene): StageRig {
   shadowPlane.position.set(DESIGN_WIDTH / 2, -DESIGN_HEIGHT / 2, SHADOW_Z)
   scene.add(shadowPlane)
 
-  const pieceMats = LEVEL.map((piece) => piece.color).map(
-    (color) =>
-      new THREE.MeshStandardMaterial({
-        color,
-        roughness: look.roughness,
-        metalness: PLASTIC_METALNESS,
-        envMapIntensity: 0,
-      }),
-  )
-  for (const material of pieceMats) material.shadowSide = THREE.BackSide
+  let pieceMats: THREE.MeshStandardMaterial[] = []
+  const pieces: StagePiece[] = []
+  let grid = makeGrid()
+  scene.add(grid)
 
-  scene.add(makeGrid())
-
-  const pieces: StagePiece[] = LEVEL.map((piece, index) => {
-    const mesh = new THREE.Mesh(new THREE.BufferGeometry(), pieceMats[index])
-    mesh.castShadow = true
-    mesh.receiveShadow = true
-    const anchor = new THREE.Group()
-    anchor.position.z = FLOOR_TOP
-    anchor.add(mesh)
-    const outline = new THREE.Mesh(
-      new THREE.BufferGeometry(),
-      new THREE.MeshBasicMaterial({
-        color: brighter(pieceMats[index].color),
-        side: THREE.BackSide,
-        transparent: true,
-        opacity: 0,
-        depthWrite: false,
-        polygonOffset: true,
-        polygonOffsetFactor: -2,
-        polygonOffsetUnits: -2,
-        toneMapped: false,
-      }),
-    )
-    outline.visible = false
-    outline.castShadow = false
-    outline.receiveShadow = false
-    outline.layers.set(1)
-    outline.renderOrder = 2
-    mesh.add(outline)
-    scene.add(anchor)
-    return {
-      anchor,
-      mesh,
-      outline,
-      cells: piece.cells,
-      locals: [],
-      half: 0,
-      height: 0,
-      restZ: FLOOR_TOP,
-      alive: true,
+  const clearPieces = () => {
+    for (const piece of pieces) {
+      scene.remove(piece.anchor)
+      piece.mesh.geometry.dispose()
+      piece.outline.geometry.dispose()
+      const outlineMaterial = piece.outline.material
+      if (outlineMaterial instanceof THREE.Material) outlineMaterial.dispose()
     }
-  })
+    pieces.length = 0
+    for (const material of pieceMats) material.dispose()
+    pieceMats = []
+    scene.remove(grid)
+    const map = grid.material instanceof THREE.MeshStandardMaterial ? grid.material.map : null
+    grid.geometry.dispose()
+    if (grid.material instanceof THREE.Material) grid.material.dispose()
+    map?.dispose()
+  }
 
   const placeCube = (size: number, corner: number, edge: number) => {
     const bevel = Math.min(Math.max(1, edge), size / 2 - 1.5)
@@ -264,20 +256,41 @@ export function mountStage(scene: THREE.Scene): StageRig {
       piece.mesh.geometry.dispose()
       piece.mesh.geometry = next.geometry
       piece.outline.geometry.dispose()
-      piece.outline.geometry = silhouetteSleeve(next.outline, bevel + OUTLINE, size)
+      piece.outline.geometry = next.sleeve
       if (first) {
         piece.anchor.position.x = next.x
         piece.anchor.position.y = next.y
       }
       piece.locals = piece.cells.map(([col, row]) => ({
-        x: ORIGIN_X + (col + 0.5) * CELL - next.x,
-        y: -(ORIGIN_Y + (row + 0.5) * CELL) - next.y,
+        x: originX() + (col + 0.5) * CELL - next.x,
+        y: -(originY() + (row + 0.5) * CELL) - next.y,
       }))
       piece.half = size / 2
       piece.height = size
     }
   }
-  placeCube(look.size, look.corner, look.edge)
+
+  const load = (level: LevelFile) => {
+    useBoard(level.cols, level.rows)
+    clearPieces()
+    grid = makeGrid()
+    scene.add(grid)
+    for (const source of level.pieces) {
+      if (source.cells.length === 0) continue
+      const material = new THREE.MeshStandardMaterial({
+        color: source.color,
+        roughness: look.roughness,
+        metalness: PLASTIC_METALNESS,
+        envMapIntensity: 0,
+      })
+      material.shadowSide = THREE.BackSide
+      pieceMats.push(material)
+      const piece = makePiece(source, material)
+      scene.add(piece.anchor)
+      pieces.push(piece)
+    }
+    placeCube(look.size, look.corner, look.edge)
+  }
 
   return {
     pieces,
@@ -296,12 +309,58 @@ export function mountStage(scene: THREE.Scene): StageRig {
       look.roughness = value
       for (const material of pieceMats) material.roughness = value
     },
+    load,
+    dispose() {
+      clearPieces()
+    },
+  }
+}
+
+function makePiece(source: LevelPiece, material: THREE.MeshStandardMaterial): StagePiece {
+  const mesh = new THREE.Mesh(new THREE.BufferGeometry(), material)
+  mesh.castShadow = true
+  mesh.receiveShadow = true
+  const anchor = new THREE.Group()
+  anchor.position.z = FLOOR_TOP
+  anchor.add(mesh)
+  const outline = new THREE.Mesh(
+    new THREE.BufferGeometry(),
+    new THREE.MeshBasicMaterial({
+      color: brighter(material.color),
+      side: THREE.BackSide,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
+      toneMapped: false,
+    }),
+  )
+  outline.visible = false
+  outline.castShadow = false
+  outline.receiveShadow = false
+  outline.layers.set(1)
+  outline.renderOrder = 2
+  mesh.add(outline)
+  return {
+    anchor,
+    mesh,
+    outline,
+    cells: source.cells,
+    locals: [],
+    half: 0,
+    height: 0,
+    restZ: FLOOR_TOP,
+    alive: true,
   }
 }
 
 function makeGrid(): THREE.Mesh {
+  const width = boardWidth()
+  const height = boardHeight()
   const mesh = new THREE.Mesh(
-    new THREE.PlaneGeometry(BOARD, BOARD),
+    new THREE.PlaneGeometry(width, height),
     new THREE.MeshStandardMaterial({
       map: gridTexture(),
       roughness: BOARD_ROUGHNESS,
@@ -310,23 +369,23 @@ function makeGrid(): THREE.Mesh {
       depthWrite: false,
     }),
   )
-  mesh.position.set(ORIGIN_X + BOARD / 2, -(ORIGIN_Y + BOARD / 2), FLOOR_TOP + 0.15)
+  mesh.position.set(originX() + width / 2, -(originY() + height / 2), FLOOR_TOP + 0.15)
   mesh.receiveShadow = true
   return mesh
 }
 
 function gridTexture(): THREE.CanvasTexture {
-  const size = 640
+  const { cols, rows } = boardSize()
+  const cell = 128
   const canvas = document.createElement('canvas')
-  canvas.width = size
-  canvas.height = size
+  canvas.width = cols * cell
+  canvas.height = rows * cell
   const ctx = canvas.getContext('2d')!
-  ctx.clearRect(0, 0, size, size)
-  const cell = size / GRID
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
   const gap = (GAP / CELL) * cell
   ctx.fillStyle = 'rgba(150, 110, 72, 0.14)'
-  for (let row = 0; row < GRID; row++) {
-    for (let col = 0; col < GRID; col++) {
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
       const x = col * cell + gap / 2
       const y = row * cell + gap / 2
       const w = cell - gap
@@ -346,30 +405,76 @@ function pieceGeometry(
   size: number,
   corner: number,
   bevel: number,
-): { geometry: THREE.BufferGeometry; outline: [number, number][]; x: number; y: number } {
+): { geometry: THREE.BufferGeometry; sleeve: THREE.BufferGeometry; x: number; y: number } {
   const home = new THREE.Vector2()
   for (const [col, row] of cells) {
-    home.x += ORIGIN_X + (col + 0.5) * CELL
-    home.y += -(ORIGIN_Y + (row + 0.5) * CELL)
+    home.x += originX() + (col + 0.5) * CELL
+    home.y += -(originY() + (row + 0.5) * CELL)
   }
   home.multiplyScalar(1 / cells.length)
   // ExtrudeGeometry flares the outline out by bevelSize and adds a bevel on both ends.
   // The shape is the contracted cap, so the widest section lands on the cell body.
+  // A piece may be several separate groups of cells. Each group is its own solid.
   const margin = (CELL - size) / 2 + bevel
-  const outline = pieceOutline(cells, margin, Math.max(0.5, corner - bevel), home)
-  const shape = new THREE.Shape()
-  outline.forEach(([x, y], i) => (i === 0 ? shape.moveTo(x, y) : shape.lineTo(x, y)))
-  shape.closePath()
-  const geometry = new THREE.ExtrudeGeometry(shape, {
-    depth: Math.max(1, size - bevel * 2),
-    bevelEnabled: true,
-    bevelThickness: bevel,
-    bevelSize: bevel,
-    bevelSegments: 8,
-    curveSegments: 1,
-  })
-  geometry.translate(0, 0, bevel)
-  return { geometry, outline, x: home.x, y: home.y }
+  const radius = Math.max(0.5, corner - bevel)
+  const bodies: THREE.BufferGeometry[] = []
+  const sleeves: THREE.BufferGeometry[] = []
+  for (const part of cellComponents(cells)) {
+    const outline = pieceOutline(part, margin, radius, home)
+    const shape = new THREE.Shape()
+    outline.forEach(([x, y], i) => (i === 0 ? shape.moveTo(x, y) : shape.lineTo(x, y)))
+    shape.closePath()
+    const geometry = new THREE.ExtrudeGeometry(shape, {
+      depth: Math.max(1, size - bevel * 2),
+      bevelEnabled: true,
+      bevelThickness: bevel,
+      bevelSize: bevel,
+      bevelSegments: 8,
+      curveSegments: 1,
+    })
+    geometry.translate(0, 0, bevel)
+    bodies.push(geometry)
+    sleeves.push(silhouetteSleeve(outline, bevel + OUTLINE, size))
+  }
+  return { geometry: mergeParts(bodies), sleeve: mergeParts(sleeves), x: home.x, y: home.y }
+}
+
+function mergeParts(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
+  if (parts.length === 1) return parts[0]
+  const merged = mergeGeometries(parts, false)
+  for (const part of parts) part.dispose()
+  return merged ?? new THREE.BufferGeometry()
+}
+
+/** Groups of cells that share a side. Corner contact stays separate. */
+function cellComponents(cells: readonly (readonly [number, number])[]): [number, number][][] {
+  const pending = new Set(cells.map(([col, row]) => `${col},${row}`))
+  const groups: [number, number][][] = []
+  for (const [col, row] of cells) {
+    const key = `${col},${row}`
+    if (!pending.has(key)) continue
+    pending.delete(key)
+    const group: [number, number][] = []
+    const stack: [number, number][] = [[col, row]]
+    while (stack.length > 0) {
+      const [currentCol, currentRow] = stack.pop()!
+      group.push([currentCol, currentRow])
+      const neighbors: [number, number][] = [
+        [currentCol + 1, currentRow],
+        [currentCol - 1, currentRow],
+        [currentCol, currentRow + 1],
+        [currentCol, currentRow - 1],
+      ]
+      for (const [nextCol, nextRow] of neighbors) {
+        const nextKey = `${nextCol},${nextRow}`
+        if (!pending.has(nextKey)) continue
+        pending.delete(nextKey)
+        stack.push([nextCol, nextRow])
+      }
+    }
+    groups.push(group)
+  }
+  return groups
 }
 
 /** Same hue, lifted so the stroke reads lighter than the piece. */
@@ -482,8 +587,8 @@ function pieceOutline(
   const pixels: [number, number][] = welded.map((point) => [point[0] * CELL, point[1] * CELL])
   // Positive offsetClosed distance is outward. The body is inset, then filleted.
   return filletConvex(offsetClosed(pixels, -inset), radius).map(([x, y]) => [
-    ORIGIN_X + x - home.x,
-    -(ORIGIN_Y + y) - home.y,
+    originX() + x - home.x,
+    -(originY() + y) - home.y,
   ])
 }
 

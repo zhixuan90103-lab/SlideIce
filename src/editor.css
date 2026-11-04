@@ -1,0 +1,109 @@
+body {
+  margin: 0;
+  background: #f6ead8;
+  color: #5a341c;
+  font: 16px/1.4 "PingFang SC", sans-serif;
+}
+
+#editor {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.editor-bar,
+.editor-size,
+.editor-tools,
+.piece-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.editor-bar button,
+.editor-tools button,
+.piece-name input,
+.editor-size input {
+  height: 36px;
+  border: 0;
+  border-radius: 10px;
+  background: white;
+  color: #5a341c;
+}
+
+.editor-bar button,
+.editor-tools button,
+.piece-row {
+  padding: 0 12px;
+  cursor: pointer;
+}
+
+.editor-tools button.is-on,
+.piece-row.is-on {
+  outline: 3px solid #5a341c;
+}
+
+.color-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.color-swatch {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.color-swatch.is-on {
+  outline: 3px solid #5a341c;
+}
+
+.piece-row {
+  height: 36px;
+  border: 0;
+  border-radius: 10px;
+  color: white;
+}
+
+.editor-size input {
+  width: 64px;
+  margin-left: 6px;
+  text-align: center;
+}
+
+.paint-board {
+  display: grid;
+  gap: 4px;
+  width: max-content;
+  padding: 8px;
+  border-radius: 16px;
+  background: rgba(150, 110, 72, 0.16);
+  touch-action: none;
+}
+
+.paint-cell {
+  width: 46px;
+  height: 46px;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(255, 248, 238, 0.8);
+}
+
+.paint-cell.is-selected {
+  box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.9);
+}
+
+.editor-status {
+  min-height: 1.4em;
+}

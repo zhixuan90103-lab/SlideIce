@@ -8,10 +8,10 @@
  */
 
 import * as THREE from 'three'
-import { DESIGN_HEIGHT, clientToDesign, isInDesignBounds, type StageLayout } from '../adapt/design'
+import { clientToDesign, isInDesignBounds, type StageLayout } from '../adapt/design'
 import { pulseHaptic } from './hapticFeel'
 import { mountHint } from './hint'
-import { CELL } from './look'
+import { CELL, designToBoard, viewBottomWorld } from './look'
 import { beginRock, rockRotation, stepRock, type Rock } from './rock'
 import { freshPraise, notePraiseClear, showPraise } from './praise'
 import { SHATTER, disposeShatter, makeShatter, stepShatters, type Shatter } from './shatter'
@@ -31,6 +31,7 @@ import {
   type Finger,
   type FingerSample,
 } from './slide'
+import type { LevelFile } from './level'
 import { mountStage, type StagePiece } from './stage'
 
 type Gesture = {
@@ -83,12 +84,17 @@ export type SlideGame = {
     ambient: number,
   ): void
   setCube(size: number, corner: number, edge: number): void
+  /** Rebuild the board from a level file and drop the previous gesture. */
+  load(level: LevelFile): void
 }
+
+const CLEAR_DELAY = 1
 
 export function mountSlideGame(
   scene: THREE.Scene,
   stage: HTMLElement,
   getLayout: () => StageLayout | null,
+  onCleared?: () => void,
 ): SlideGame {
   const stageLook = mountStage(scene)
   const pieces = stageLook.pieces
@@ -103,18 +109,23 @@ export function mountSlideGame(
   const landings: Landing[] = []
   const rocks = new Map<StagePiece, Rock>()
   let ended = false
+  let clearWait = 0
+  let toldClear = false
   let readyLit = false
   let held: StagePiece | null = null
   const shatters: Shatter[] = []
   const praise = freshPraise()
   const hint = mountHint()
   const pointer = { x: 0, y: 0 }
+  let pointerInside = false
   const designOf = (event: PointerEvent): { x: number; y: number } | null => {
     const layout = getLayout()
     if (!layout) return null
     const point = clientToDesign(event.clientX, event.clientY, stage.getBoundingClientRect(), layout.scale)
-    pointer.x = point.x
-    pointer.y = point.y
+    const board = designToBoard(point.x, point.y)
+    pointer.x = board.x
+    pointer.y = board.y
+    pointerInside = inDesign(point.x, point.y)
     return pointer
   }
 
@@ -142,7 +153,7 @@ export function mountSlideGame(
     const burst = makeShatter(scene, chipPoints(piece), x, y, pieceColor(piece))
     if (burst) shatters.push(burst)
     showPraise(x, -y, notePraiseClear(praise, 1))
-    if (pieces.every((item) => !item.alive)) ended = true
+    if (pieces.length > 0 && pieces.every((item) => !item.alive)) ended = true
   }
 
   const endGesture = () => {
@@ -248,7 +259,7 @@ export function mountSlideGame(
     if (gesture?.piece) release(gesture.piece)
     else if (gesture) endGesture()
     const point = designOf(event)
-    if (!point || !inDesign(point.x, point.y)) return
+    if (!point || !pointerInside) return
     const hit = pieceAt(point.x, point.y, pieces)
     stage.setPointerCapture(event.pointerId)
     gesture = {
@@ -418,7 +429,14 @@ export function mountSlideGame(
         piece.mesh.rotation.x = tilt.x
         piece.mesh.rotation.y = tilt.y
       }
-      stepShatters(shatters, -DESIGN_HEIGHT - SHATTER.chip, dt)
+      if (ended && !toldClear) {
+        clearWait += dt
+        if (clearWait >= CLEAR_DELAY) {
+          toldClear = true
+          onCleared?.()
+        }
+      }
+      stepShatters(shatters, viewBottomWorld() - SHATTER.chip, dt)
       for (let i = shatters.length - 1; i >= 0; i--) {
         if (!shatters[i].dead) continue
         disposeShatter(shatters[i])
@@ -472,8 +490,29 @@ export function mountSlideGame(
         }
       }
     },
+    load(level) {
+      if (gesture) releaseFinger(gesture.samples)
+      gesture = null
+      held = null
+      landings.length = 0
+      rocks.clear()
+      for (const burst of shatters) disposeShatter(burst)
+      shatters.length = 0
+      praise.rank = 0
+      praise.live = false
+      ended = false
+      clearWait = 0
+      toldClear = false
+      readyLit = false
+      hintTargets.length = 0
+      hint.set(hintTargets)
+      stageLook.load(level)
+      lifts.clear()
+      for (const piece of pieces) lifts.set(piece, 0)
+    },
     dispose() {
       if (gesture) releaseFinger(gesture.samples)
+      stageLook.dispose()
       stage.removeEventListener('pointerdown', onDown)
       stage.removeEventListener('lostpointercapture', onLostCapture)
       stage.removeEventListener('pointermove', onMove)

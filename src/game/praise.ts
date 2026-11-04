@@ -5,6 +5,7 @@
  */
 
 import { DESIGN_HEIGHT, DESIGN_WIDTH } from '../adapt/design'
+import { boardToStage } from './look'
 
 export type PraiseCombo = {
   rank: number
@@ -92,7 +93,8 @@ export function showPraise(x: number, y: number, rank: number): void {
   const line = LINES[Math.min(rank, LINES.length) - 1]
   const id = `praise-fill-${serial}`
   serial += 1
-  const spot = placePraise(x, y, line.text)
+  const stage = boardToStage(x, y)
+  const spot = placePraise(stage.x, stage.y, line.text)
   const word = wordLayout(line.text)
   const node = takePraiseNode(host)
   node.className = ''

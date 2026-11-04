@@ -4,9 +4,10 @@
  */
 
 import * as THREE from 'three';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { Capacitor } from '@capacitor/core';
-import { FRAME_DIST, STAGE_BG, STAGE_BG_CSS, frameDistance, look } from './game/look';
+import { DIST_MAX, DIST_MIN, FRAME_DIST, STAGE_BG, STAGE_BG_CSS, look, openDistance } from './game/look';
+import { levelCount, readLevel, writeLevelDist } from './game/levels';
+import { mountResult } from './game/result';
 import { mountSlideGame, type SlideGame } from './game/play';
 import {
   DESIGN_HEIGHT,
@@ -42,7 +43,11 @@ function mountFps(): (frame: number) => void {
   };
 }
 
-function mountLookTune(camera: THREE.PerspectiveCamera, game: SlideGame): void {
+function mountLookTune(
+  camera: THREE.PerspectiveCamera,
+  game: SlideGame,
+  onDist: (dist: number) => void,
+): void {
   const root = document.getElementById('ui-root');
   if (!root) return;
   const wrap = document.createElement('div');
@@ -67,7 +72,7 @@ function mountLookTune(camera: THREE.PerspectiveCamera, game: SlideGame): void {
     ['辅仰角', 'fillEl', look.fillEl, 5, 85, 1],
     ['俯仰', 'pitch', look.pitch, -70, 70, 1],
     ['偏航', 'yaw', look.yaw, -180, 180, 1],
-    ['距离', 'dist', look.dist, 400, 2200, 20],
+    ['距离', 'dist', look.dist, DIST_MIN, DIST_MAX, 20],
     ['块', 'size', look.size, 30, 90, 1],
     ['圆角', 'corner', look.corner, 2, 24, 1],
     ['棱', 'edge', look.edge, 1, 20, 1],
@@ -110,14 +115,7 @@ function mountLookTune(camera: THREE.PerspectiveCamera, game: SlideGame): void {
     else if (kind === 'pitch') look.pitch = value;
     else if (kind === 'yaw') look.yaw = value;
     else if (kind === 'dist') look.dist = value;
-    else if (kind === 'size') {
-      look.size = value;
-      look.dist = frameDistance(value);
-      const distInput = panel.querySelector<HTMLInputElement>('input[data-k="dist"]');
-      const distOut = distInput?.parentElement?.querySelector('output');
-      if (distInput) distInput.value = String(look.dist);
-      if (distOut) distOut.textContent = String(Math.round(look.dist));
-    }
+    else if (kind === 'size') look.size = value;
     else if (kind === 'corner') look.corner = value;
     else if (kind === 'edge') look.edge = value;
     else if (kind === 'roughness') look.roughness = value;
@@ -127,6 +125,11 @@ function mountLookTune(camera: THREE.PerspectiveCamera, game: SlideGame): void {
     game.setCube(look.size, look.corner, look.edge);
     game.setRoughness(look.roughness);
     applyCamera(camera);
+  });
+  panel.addEventListener('change', (event) => {
+    const input = event.target;
+    if (!(input instanceof HTMLInputElement) || input.dataset.k !== 'dist') return;
+    onDist(Number(input.value));
   });
   wrap.addEventListener('pointerdown', (event) => event.stopPropagation());
 }
@@ -162,10 +165,6 @@ async function boot(): Promise<void> {
   const scene = new THREE.Scene();
   document.documentElement.style.setProperty('--stage-bg', STAGE_BG_CSS);
   scene.background = new THREE.Color(STAGE_BG);
-  const pmrem = new THREE.PMREMGenerator(renderer as unknown as THREE.WebGLRenderer);
-  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-  scene.environmentIntensity = 0;
-  pmrem.dispose();
 
   // Mild perspective. The vertical view at CAMERA_DIST matches the 844 design height.
   // Pitch lifts the camera toward world +y so the screen-down faces show. Hits stay on the design grid.
@@ -208,11 +207,65 @@ async function boot(): Promise<void> {
   }
 
   const fps = mountFps();
-  game = mountSlideGame(scene, stage, () => latestLayout);
+  let levelIndex = 1;
+  const result = mountResult({
+    replay: () => {
+      void showLevel(levelIndex);
+    },
+    next: () => {
+      void showLevel(levelIndex + 1);
+    },
+  });
+  game = mountSlideGame(scene, stage, () => latestLayout, () => result.show());
   look.pitch = -5;
   applyCamera(camera);
-  mountLookTune(camera, game);
+  const rememberDist = (dist: number): void => {
+    void writeLevelDist(levelIndex, dist);
+  };
+  mountLookTune(camera, game, rememberDist);
   game.setLights(look.key, look.keyAz, look.keyEl, look.fill, look.fillAz, look.fillEl, look.ambient);
+
+  async function showLevel(index: number): Promise<void> {
+    const count = await levelCount();
+    const next = ((index - 1) % count + count) % count + 1;
+    const level = await readLevel(next);
+    levelIndex = next;
+    result.hide();
+    game?.load(level);
+    openDistance(level.dist);
+    const distInput = document.querySelector<HTMLInputElement>('input[data-k="dist"]');
+    const distOut = distInput?.parentElement?.querySelector('output');
+    if (distInput) distInput.value = String(Math.round(look.dist));
+    if (distOut) distOut.textContent = String(Math.round(look.dist));
+    applyCamera(camera);
+    if (import.meta.env.DEV) jumpLabel.textContent = `第 ${next} 关`;
+  }
+
+  const jumpLabel = document.createElement('output');
+  if (import.meta.env.DEV) {
+    const jump = document.createElement('div');
+    jump.id = 'level-jump';
+    const prev = document.createElement('button');
+    prev.type = 'button';
+    prev.textContent = '上一关';
+    const next = document.createElement('button');
+    next.type = 'button';
+    next.textContent = '下一关';
+    const field = document.createElement('input');
+    field.type = 'number';
+    field.min = '1';
+    field.value = '1';
+    field.setAttribute('aria-label', '关卡号');
+    prev.addEventListener('click', () => void showLevel(levelIndex - 1));
+    next.addEventListener('click', () => void showLevel(levelIndex + 1));
+    field.addEventListener('change', () => void showLevel(Number(field.value)));
+    jump.append(prev, jumpLabel, field, next);
+    document.body.append(jump);
+  }
+
+  const asked = Number(new URLSearchParams(window.location.search).get('level'));
+  const start = import.meta.env.DEV && Number.isInteger(asked) && asked > 0 ? asked : 1;
+  await showLevel(start);
 
   renderer.setAnimationLoop(() => {
     const now = performance.now();

@@ -103,6 +103,59 @@ body {
  * All interactive / readable UI lives here (design coords).
  * Safe padding clears Dynamic Island + home indicator.
  */
+.result {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(42, 24, 14, 0.28);
+  pointer-events: auto;
+}
+
+.result[hidden] {
+  display: none;
+}
+
+.result-card {
+  width: 240px;
+  padding: 28px 22px 22px;
+  border-radius: 28px;
+  background: #fff8ee;
+  box-shadow: 0 16px 40px rgba(62, 32, 12, 0.18);
+  text-align: center;
+}
+
+.result-title {
+  margin: 0 0 18px;
+  color: #5a341c;
+  font: 700 28px/1.2 Fredoka, "PingFang SC", sans-serif;
+}
+
+.result-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.result-actions button {
+  flex: 1;
+  height: 46px;
+  border: 0;
+  border-radius: 16px;
+  font: 700 16px/1 Fredoka, "PingFang SC", sans-serif;
+}
+
+#result-replay {
+  background: #f3e2cc;
+  color: #6a4328;
+}
+
+#result-next {
+  background: #ef8b3a;
+  color: white;
+}
+
 .fps {
   position: absolute;
   top: 0;
@@ -238,6 +291,37 @@ button:active {
 }
 
 /* Desktop device switcher (outside design stage — allowed exception) */
+#level-jump {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 20;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 6px;
+  border-radius: 12px;
+  background: rgba(255, 248, 238, 0.94);
+  color: #5a341c;
+  font: 600 13px/1 "PingFang SC", sans-serif;
+}
+
+#level-jump button,
+#level-jump input {
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  background: #f3e2cc;
+  color: #5a341c;
+  font: inherit;
+}
+
+#level-jump input {
+  width: 52px;
+  text-align: center;
+  background: white;
+}
+
 #device-switcher {
   position: fixed;
   top: 12px;
