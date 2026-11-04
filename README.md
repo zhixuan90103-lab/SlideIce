@@ -46,7 +46,7 @@ npm run cap:open
 
 日常只改网页：`npm run cap:sync`。改 Swift / 第一次：`ios:bootstrap`（会改 SceneDelegate，否则真机 `plugin: false`）。
 
-装真机前改 `capacitor.config.ts` 的 `appId`，避免和已装 App 冲突。验收看 HUD `plugin: true` 再点 **点我震动**。
+装真机前改 `capacitor.config.ts` 的 `appId`，避免和已装 App 冲突。震动是否接上见 [docs/HAPTICS.md](./docs/HAPTICS.md)。手感参数在 [docs/GAME.md](./docs/GAME.md) §2.4。
 
 ## 复用到新游戏
 

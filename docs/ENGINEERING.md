@@ -108,7 +108,7 @@ SceneDelegate.rootViewController = BridgeViewController()
 
 只改 storyboard **不够**：Capacitor 8 用 SceneDelegate 直接 `CAPBridgeViewController()`，会绕过 storyboard，HUD 出现 `plugin: false`，按钮无震。
 
-Swift **没有** `prepare`；引擎在 `load()` 启动。UIKit 反馈在主线程触发。验收用 HUD **点我震动**（`impact`）和状态行 `plugin: true`。  
+Swift **没有** `prepare`；引擎在 `load()` 启动。UIKit 反馈在主线程触发。验收看控制台 `plugin: true`，再在关卡里拿起一块。玩法参数在 [GAME.md §2.4](./GAME.md)。  
 业务节奏（具名事件、cooldown、开关）写在游戏层，不要改插件除非新增原生方法。
 
 ## 7b. Audio（尚未实现）

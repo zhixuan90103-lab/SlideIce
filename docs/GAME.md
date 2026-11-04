@@ -2,7 +2,7 @@
 
 配套：[AGENTS.md](../AGENTS.md) · [STAGE.md](./STAGE.md)
 
-当前玩法。关卡占格和棋盘边长在 `src/game/level.ts` 的 `GRID`。指针和落格队列在 `play.ts`。锁轴、碰撞和松手计划在 `slide.ts`。格子、越边和轮廓在 `stage.ts`。落格晃动在 `rock.ts`。描边在 `stage.ts`。发亮在 `hint.ts`，碎块在 `shatter.ts`，文字在 `praise.ts`。画面在 [STAGE.md](STAGE.md)。同一问题只问一处，见 §5。
+当前玩法。关卡占格和棋盘边长在 `src/game/level.ts` 的 `GRID`。指针和落格队列在 `play.ts`。锁轴、碰撞和松手计划在 `slide.ts`。格子、越边和轮廓在 `stage.ts`。落格晃动在 `rock.ts`。描边在 `stage.ts`。发亮在 `hint.ts`，碎块在 `shatter.ts`，文字在 `praise.ts`。四下短震的时机和参数在 `hapticFeel.ts`，见 §2.4。画面在 [STAGE.md](STAGE.md)。同一问题只问一处，见 §5。
 
 格子：列向右，行向下，左上是 `(0,0)`。世界坐标 `x = 设计 x`，`y = −设计 y`。下是世界 −y，左是世界 −x。
 
@@ -89,7 +89,7 @@
 
 ## 2.4 震动
 
-四下都是一次短震，参数和 Ring 相同。浏览器没有插件时走 `navigator.vibrate`。按住同一处接触不连震。发亮灭了再亮才再震一次。
+四下都是一次短震，只走 `hapticFeel.ts` 的 `pulseHaptic`。浏览器没有插件时走 `navigator.vibrate`，没有强度差别。真机才用下表的强度和锐度。按住同一处接触不连震。发亮灭了再亮才再震一次。插件怎么注册见 [HAPTICS.md](./HAPTICS.md)，页面上没有单独的震动按钮。
 
 | 时机 | 强度 | 锐度 |
 |------|------|------|
@@ -138,3 +138,4 @@
 | 棋盘有几格 | `level.ts` 的 `GRID` |
 | 屏幕上的点换成设计坐标 | `clientToDesign`，参数是 `#stage` 的边框和缩放 |
 | 一块正在飞向格子 | `play.ts` 的落格列表。一块一条，按下时整表打断 |
+| 拿起、撞上、发亮、离场的震动 | `hapticFeel.ts` 的 `pulseHaptic`。不要在玩法里再调一次 `playTransient` |

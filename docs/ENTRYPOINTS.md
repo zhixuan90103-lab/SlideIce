@@ -25,7 +25,7 @@ index.html
        → #ui-root：FPS、收起的设置
 ```
 
-第一关不调用震动，页面上没有「点我震动」。插件注册仍见下文，接线见 [HAPTICS.md](./HAPTICS.md)。
+第一关在拿起、撞上、发亮和离场时调用 `pulseHaptic`，参数见 [GAME.md §2.4](./GAME.md)。页面上没有震动按钮。插件注册见 [HAPTICS.md](./HAPTICS.md)。
 
 ## 3. DOM
 
@@ -55,7 +55,7 @@ Xcode Run 真机
   → 同上 Web 链
 ```
 
-插件是否进 JS，以 [HAPTICS.md §0](./HAPTICS.md) 的验收为准。当前关卡不挂震动按钮。`SceneDelegate` 仍是默认 `CAPBridgeViewController` 时，插件不会注册。
+插件是否进 JS，以 [HAPTICS.md §0](./HAPTICS.md) 的控制台检查为准。玩法验收是真机上拿起一块有一下短震。`SceneDelegate` 仍是默认 `CAPBridgeViewController` 时，插件不会注册。
 
 ## 5. 改配置找谁
 

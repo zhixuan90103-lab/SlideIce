@@ -21,7 +21,8 @@
 | WebGPU | `src/create-renderer.ts` |
 | 震动 JS | `src/utils/haptics.ts` |
 | 震动 Swift 真源 | `plugins/native-haptics/*` |
-| 震动怎么接 | `docs/HAPTICS.md` **§0 正确接入** |
+| 震动时机和参数 | `src/game/hapticFeel.ts`，规范 [docs/GAME.md](docs/GAME.md) §2.4 |
+| 震动插件怎么注册 | `docs/HAPTICS.md` **§0** |
 | Capacitor | `capacitor.config.ts`（`contentInset: never`） |
 | 构建 | `vite.config.ts`（**`base: './'`**） |
 | iOS 注入 | `scripts/bootstrap-ios.mjs` |
@@ -46,7 +47,7 @@
 4. **布局坐标 390×844**；禁止 `renderer.setSize(window.innerWidth,…)`  
 5. **UI 只挂 `#ui-root`**；禁止玩法 UI `position: fixed` 贴浏览器窗  
 6. **Pad 只改外层视口**，不改 `DESIGN_*`  
-7. **改 Swift 改 `plugins/native-haptics/`** 再 `ios:bootstrap`；震动接线见 `docs/HAPTICS.md`。Capacitor 8 的 `SceneDelegate` 必须 `rootViewController = BridgeViewController()`（默认 `CAPBridgeViewController` 不会注册插件）。不要用 JS `prepare()` 判断是否接上；真机 HUD 看 `plugin: true` + 点「点我震动」。  
+7. **改 Swift 改 `plugins/native-haptics/`** 再 `ios:bootstrap`。玩法只调 `pulseHaptic`，参数见 GAME.md §2.4。插件注册见 `docs/HAPTICS.md`。Capacitor 8 的 `SceneDelegate` 必须 `rootViewController = BridgeViewController()`（默认 `CAPBridgeViewController` 不会注册插件）。不要用 JS `prepare()` 判断是否接上。真机控制台看 `plugin: true`，再拿起一块确认有震。页面没有震动按钮。  
 8. **无 WebGPU 则明确失败**，不静默 WebGL  
 9. **操作优先** — 玩家操作的反馈是第一优先级。动画不能挡住操作，播放中的动画可以被打断。见 [docs/GAME.md](docs/GAME.md) §0
 
@@ -70,6 +71,7 @@ npm run ios
 - 画面：按 [docs/STAGE.md](docs/STAGE.md)。没有底板。格子缝保持 4，不随格子平面拉伸  
 - 保留：adapt / create-renderer / haptics / plugins / `base`  
 - 触控：只走 `clientToDesign`，用舞台边框换设计坐标（见 GAME.md §2）。未抓住时丢掉设计区外的点。挡住时只问 `sweep`，停在这段路程的第一次接触，不穿过去。棋盘边长只写 `level.ts` 的 `GRID`。同一问题的入口见 GAME.md §5。操作优先于动画（GAME.md §0）
+- 震动：时机和参数只写 GAME.md §2.4，调用只走 `pulseHaptic`
 - 音效：按 `docs/AUDIO.md` 接入；禁止热路径 `new Audio()` / 每发一次桥。第一关不接  
 
 ## 刻意不做

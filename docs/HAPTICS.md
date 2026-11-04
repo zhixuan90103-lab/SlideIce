@@ -2,9 +2,10 @@
 
 配套：[AGENTS.md](../AGENTS.md) · [ENGINEERING.md](./ENGINEERING.md) · [AUDIO.md](./AUDIO.md)
 
-> 本壳 **已经带原生插件 + JS 薄封装**，但只验通路，不是玩法层。  
+> 本壳 **已经带原生插件 + JS 薄封装**。  
+> 玩法震哪一下、强度多少，只写在 [GAME.md §2.4](./GAME.md)，代码在 `src/game/hapticFeel.ts`。  
 > 以前多次「没接上」，几乎都是 **只 sync、没 bootstrap**，或 **用 `prepare()` 当验收**。  
-> 正确接入按 **§0** 做；后面是差异、API、排错。
+> 正确接入按 **§0** 做。页面上没有「点我震动」。真机验收是控制台 `plugin: true`，再在关卡里拿起一块。
 
 ## 0. 正确接入（照这个做）
 
@@ -63,7 +64,7 @@ customClass="BridgeViewController" customModule="App"
 
 5. 这两个 `.swift` 在 Xcode **Compile Sources** 里。
 6. JS 只通过 `src/utils/haptics.ts` 调插件；`jsName` / `registerPlugin` / `isPluginAvailable` 三者都是字符串 **`AdvancedHaptics`**。
-7. 在 **真机 App** 里点 HUD 的 **impact / transient**，马达有反馈。
+7. 在 **真机 App** 里拿起一块，马达有反馈。控制台 `plugin: true`。
 
 ### 0.4 真机上怎么确认（控制台）
 
