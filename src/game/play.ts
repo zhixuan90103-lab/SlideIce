@@ -10,7 +10,8 @@
 import * as THREE from 'three'
 import { DESIGN_HEIGHT, DESIGN_WIDTH, type StageLayout } from '../adapt/design'
 import { mountHint } from './hint'
-import { beginRecoil, stepRecoil, wobbleOffset, type Recoil } from './recoil'
+import { CELL } from './look'
+import { beginRock, rockRotation, stepRock, type Rock } from './rock'
 import { freshPraise, notePraiseClear, showPraise } from './praise'
 import { SHATTER, disposeShatter, makeShatter, stepShatters, type Shatter } from './shatter'
 import {
@@ -99,7 +100,7 @@ export function mountSlideGame(
   const maskRestore: THREE.Material[] = []
   let gesture: Gesture | null = null
   let landing: Landing | null = null
-  const recoils = new Map<StagePiece, Recoil>()
+  const rocks = new Map<StagePiece, Rock>()
   let ended = false
   let held: StagePiece | null = null
   const shatters: Shatter[] = []
@@ -127,11 +128,6 @@ export function mountSlideGame(
     if (burst) shatters.push(burst)
     showPraise(x, -y, notePraiseClear(praise, 1))
     if (pieces.every((item) => !item.alive)) ended = true
-  }
-
-  const bump = (piece: StagePiece, axis: 'x' | 'y', sign: number) => {
-    const next = beginRecoil(axis, sign)
-    if (next) recoils.set(piece, next)
   }
 
   const endGesture = () => {
@@ -170,9 +166,35 @@ export function mountSlideGame(
     return (fingerAlong - pieceAlong) * axis.sign >= 0
   }
 
+  const flatten = (piece: StagePiece) => {
+    rocks.delete(piece)
+    piece.mesh.rotation.x = 0
+    piece.mesh.rotation.y = 0
+  }
+
+  /** Remember the slide. The rock itself waits until the anchor is on the cell. */
+  const armRock = (piece: StagePiece, dx: number, dy: number, force: AxisLock | null) => {
+    let axis: 'x' | 'y' | null = null
+    let sign = 0
+    if (force && force.sign !== 0) {
+      axis = force.axis
+      sign = force.sign
+    } else if (Math.abs(dx) >= Math.abs(dy) && Math.abs(dx) > 0.5) {
+      axis = 'x'
+      sign = Math.sign(dx)
+    } else if (Math.abs(dy) > 0.5) {
+      axis = 'y'
+      sign = Math.sign(dy)
+    }
+    const rock = axis ? beginRock(axis, sign, Math.hypot(dx, dy), CELL) : null
+    if (!rock) flatten(piece)
+    else rocks.set(piece, rock)
+  }
+
   const sit = (piece: StagePiece, force: AxisLock | null) => {
     const home = gridSnap(piece, pieces)
     landing = { piece, x: home.x, y: home.y, leave: false, speed: LAND_SPEED, settle: force }
+    armRock(piece, home.x - piece.anchor.position.x, home.y - piece.anchor.position.y, force)
   }
 
   const release = (piece: StagePiece) => {
@@ -180,15 +202,16 @@ export function mountSlideGame(
     const trend = gesture?.trend ?? null
     endGesture()
     if (plan.kind === 'eliminate') {
-      recoils.delete(piece)
-      piece.mesh.position.x = 0
-      piece.mesh.position.y = 0
+      flatten(piece)
       eliminate(piece)
       return
     }
     if (plan.kind === 'slide') {
       landing = { piece, x: plan.x, y: plan.y, leave: plan.clear, speed: plan.speed, settle: null }
-      if (!plan.clear) landing.settle = trend
+      if (!plan.clear) {
+        landing.settle = trend
+        armRock(piece, plan.x - piece.anchor.position.x, plan.y - piece.anchor.position.y, trend)
+      }
       return
     }
     sit(piece, trend)
@@ -200,7 +223,10 @@ export function mountSlideGame(
     // A second finger while the first is still held does not start a gesture.
     // A new press after a missed pointerup takes over, so the next piece is not lost.
     if (gesture && gesture.id !== event.pointerId && stage.hasPointerCapture(gesture.id)) return
-    if (landing) landing = null
+    if (landing) {
+      flatten(landing.piece)
+      landing = null
+    }
     if (gesture?.piece) release(gesture.piece)
     else if (gesture) endGesture()
     const point = designOf(event)
@@ -334,7 +360,10 @@ export function mountSlideGame(
             const home = gridSnap(done.piece, pieces)
             if (Math.hypot(home.x - done.piece.anchor.position.x, home.y - done.piece.anchor.position.y) > 0.01) {
               landing = { piece: done.piece, x: home.x, y: home.y, leave: false, speed: LAND_SPEED, settle: done.settle }
-            } else if (done.settle) bump(done.piece, done.settle.axis, done.settle.sign)
+            } else {
+              const rock = rocks.get(done.piece)
+              if (rock) rock.seated = true
+            }
           }
         } else {
           landing.piece.anchor.position.x += (dx / dist) * step
@@ -348,16 +377,14 @@ export function mountSlideGame(
       }
       hint.set(hintTargets)
       hint.step(dt)
-      for (const [piece, recoil] of recoils) {
-        if (!piece.alive || stepRecoil(recoil, dt)) {
-          piece.mesh.position.x = 0
-          piece.mesh.position.y = 0
-          recoils.delete(piece)
+      for (const [piece, rock] of rocks) {
+        if (!piece.alive || stepRock(rock, dt)) {
+          flatten(piece)
           continue
         }
-        const offset = wobbleOffset(recoil)
-        piece.mesh.position.x = recoil.axis === 'x' ? offset : 0
-        piece.mesh.position.y = recoil.axis === 'y' ? offset : 0
+        const tilt = rockRotation(rock)
+        piece.mesh.rotation.x = tilt.x
+        piece.mesh.rotation.y = tilt.y
       }
     stepShatters(shatters, -DESIGN_HEIGHT - SHATTER.chip, dt)
       for (let i = shatters.length - 1; i >= 0; i--) {
@@ -372,7 +399,9 @@ export function mountSlideGame(
         const to = piece === held ? 1 : 0
         const next = to === 1 ? 1 : from + (to - from) * step
         lifts.set(piece, next)
-        piece.anchor.position.z = piece.restZ + next * piece.height * 0.5
+        const tilt = Math.abs(piece.mesh.rotation.x) + Math.abs(piece.mesh.rotation.y)
+        const dip = tilt > 0 ? piece.half * Math.sin(tilt) : 0
+        piece.anchor.position.z = piece.restZ + next * piece.height * 0.5 + dip
         const stroke = piece.outline.material
         if (stroke instanceof THREE.MeshBasicMaterial) stroke.opacity = next
         piece.outline.visible = next > 0.02
