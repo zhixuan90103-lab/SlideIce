@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import skyUrl from '../assets/sky.png'
 import { DESIGN_HEIGHT, DESIGN_WIDTH } from '../adapt/design'
 import { LEVEL } from './level'
 import {
@@ -14,7 +15,6 @@ import {
   PLASTIC_ROUGHNESS,
   SHADOW_OPACITY,
   SHADOW_Z,
-  SKY,
   look,
 } from './look'
 
@@ -111,7 +111,7 @@ export function mountStage(scene: THREE.Scene): StageRig {
   placeLight(key, look.keyAz, look.keyEl)
   placeLight(fill, look.fillAz, look.fillEl)
 
-  scene.background = softSky()
+  scene.background = skyTexture()
   const shadowPlane = new THREE.Mesh(
     new THREE.PlaneGeometry(DESIGN_WIDTH + 800, DESIGN_HEIGHT + 800),
     new THREE.ShadowMaterial({ opacity: SHADOW_OPACITY }),
@@ -218,18 +218,8 @@ export function mountStage(scene: THREE.Scene): StageRig {
   }
 }
 
-function softSky(): THREE.CanvasTexture {
-  const canvas = document.createElement('canvas')
-  canvas.width = 2
-  canvas.height = 256
-  const ctx = canvas.getContext('2d')!
-  const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height)
-  gradient.addColorStop(0, SKY[0])
-  gradient.addColorStop(0.55, SKY[1])
-  gradient.addColorStop(1, SKY[2])
-  ctx.fillStyle = gradient
-  ctx.fillRect(0, 0, canvas.width, canvas.height)
-  const texture = new THREE.CanvasTexture(canvas)
+function skyTexture(): THREE.Texture {
+  const texture = new THREE.TextureLoader().load(skyUrl)
   texture.colorSpace = THREE.SRGBColorSpace
   return texture
 }
