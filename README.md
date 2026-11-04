@@ -9,7 +9,7 @@
 | [docs/ENTRYPOINTS.md](./docs/ENTRYPOINTS.md) | 入口与调用链 |
 | [docs/MERGE.md](./docs/MERGE.md) | 双工程优点对照与合并说明 |
 | [docs/AUDIO.md](./docs/AUDIO.md) | 音效方案（预解码 + 每帧一批 + 原生池） |
-| [docs/GAME.md](./docs/GAME.md) | 当前玩法（跟手、扫掠碰撞、描边、碰撞表现） |
+| [docs/GAME.md](./docs/GAME.md) | 当前玩法（跟手、扫掠碰撞、描边、落格晃动） |
 | [docs/STAGE.md](./docs/STAGE.md) | 当前画面 |
 | [docs/HAPTICS.md](./docs/HAPTICS.md) | 震动如何一次接对（插件注册 + 玩法层） |
 
