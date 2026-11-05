@@ -46,8 +46,6 @@ export type Shatter = {
   dead: boolean
 }
 
-const CHIP_POOL = 160
-const shatterPool: Shatter[] = []
 const dummy = new THREE.Object3D()
 let chipGeometry: THREE.ExtrudeGeometry | null = null
 
@@ -79,28 +77,28 @@ function sharedChipGeometry(): THREE.ExtrudeGeometry {
   return chipGeometry
 }
 
-function takeShatter(count: number): Shatter {
-  const index = shatterPool.findIndex((slot) => slot.x.length >= count)
-  const ready = index >= 0 ? shatterPool.splice(index, 1)[0] : null
-  if (ready) return ready
-  const capacity = Math.max(CHIP_POOL, count)
+/**
+ * One mesh per burst, sized to this burst.
+ * WebGPU sizes the instance buffer on first draw and does not grow it.
+ */
+function createShatter(count: number): Shatter {
   const material = new THREE.MeshStandardMaterial({ roughness: look.roughness, metalness: PLASTIC_METALNESS })
-  const mesh = new THREE.InstancedMesh(sharedChipGeometry(), material, capacity)
+  const mesh = new THREE.InstancedMesh(sharedChipGeometry(), material, count)
   mesh.frustumCulled = false
   mesh.castShadow = false
   mesh.receiveShadow = false
   return {
     mesh,
-    x: new Float32Array(capacity),
-    y: new Float32Array(capacity),
-    vx: new Float32Array(capacity),
-    vy: new Float32Array(capacity),
-    spin: new Float32Array(capacity),
-    pitch: new Float32Array(capacity),
-    roll: new Float32Array(capacity),
-    theta: new Float32Array(capacity),
-    scale: new Float32Array(capacity),
-    count: 0,
+    x: new Float32Array(count),
+    y: new Float32Array(count),
+    vx: new Float32Array(count),
+    vy: new Float32Array(count),
+    spin: new Float32Array(count),
+    pitch: new Float32Array(count),
+    roll: new Float32Array(count),
+    theta: new Float32Array(count),
+    scale: new Float32Array(count),
+    count,
     age: 0,
     dead: false,
   }
@@ -115,7 +113,7 @@ export function makeShatter(
 ): Shatter | null {
   if (points.length === 0) return null
   const count = points.length
-  const shatter = takeShatter(count)
+  const shatter = createShatter(count)
   const { mesh } = shatter
   const material = mesh.material
   if (material instanceof THREE.MeshStandardMaterial) {
@@ -216,7 +214,7 @@ export function stepShatters(shatters: Shatter[], viewBottom: number, dt: number
 
 export function disposeShatter(shatter: Shatter): void {
   shatter.mesh.removeFromParent()
-  shatter.mesh.count = 0
-  shatter.mesh.visible = false
-  shatterPool.push(shatter)
+  const material = shatter.mesh.material
+  if (material instanceof THREE.Material) material.dispose()
+  shatter.mesh.dispose()
 }

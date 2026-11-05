@@ -149,3 +149,4 @@ npm run cap:sync
 | 2026-08-14 | 增加 HAPTICS.md：震动一次接对 |
 | 2026-08-31 | 真机震动验通。根因：Capacitor 8 `SceneDelegate` 绕过 storyboard。bootstrap 现会改 SceneDelegate；HUD 用「点我震动」+ `plugin` 标志验收 |
 | 2026-11-05 | 关卡改为 `1.json`–`9.json`。每关 `dist` 由 `openDistance` 读取。没有环境贴图。碎块下沿和表扬文字跟当前镜头 |
+| 2026-11-05 | 选中后不换块，空白滑上才问 `grabTarget`。有一格中心越出且出口通畅就消除。没有关卡文件时 `openLevel` 回到第 1 关。碎块按当次粒子数新建网格 |

@@ -8,7 +8,7 @@
 
 import { CELL } from './look'
 import {
-  crossesEdge,
+  centerPastEdge,
   exitDistance,
   nearestCellCenter,
   poseOnBoard,
@@ -183,34 +183,18 @@ function sweep(
   return { t, piece: hit }
 }
 
-/** First piece in front of `piece` along `side`, or null when that way is open. */
-export function pieceAhead(
-  piece: StagePiece,
-  pieces: readonly StagePiece[],
-  side: AxisLock,
-): StagePiece | null {
-  const ox = piece.anchor.position.x
-  const oy = piece.anchor.position.y
-  const reach = Math.max(exitDistance(piece, ox, oy, side.axis, side.sign), CELL * 8)
-  const dx = side.axis === 'x' ? side.sign * reach : 0
-  const dy = side.axis === 'y' ? side.sign * reach : 0
-  const hit = sweep(piece, ox, oy, dx, dy, othersOf(pieces, piece))
-  return hit.t < 1 ? hit.piece : null
-}
-
 function alongScore(piece: StagePiece, side: AxisLock): number {
   const value = side.axis === 'x' ? piece.anchor.position.x : piece.anchor.position.y
   return value * side.sign
 }
 
 /**
- * Piece that should replace the held one.
- * Still on the held piece: only the piece directly ahead, once the finger touches it.
- * Finger has left the held piece and rests on another: that piece, even when the sweep missed it.
+ * Piece to take when the finger is not holding one.
+ * A held piece is never replaced here; it stays until the finger lifts.
+ * Several pieces under the finger: the one furthest along the trend.
  * `skip` rejects pieces that are already landing.
  */
-export function replacementTarget(
-  current: StagePiece | null,
+export function grabTarget(
   pieces: readonly StagePiece[],
   trend: AxisLock | null,
   x: number,
@@ -222,19 +206,12 @@ export function replacementTarget(
     if (!piece.alive || skip(piece)) continue
     if (coversPiece(piece, x, y)) hits.push(piece)
   }
-  if (current && hits.includes(current)) {
-    if (!trend) return null
-    const ahead = pieceAhead(current, pieces, trend)
-    if (ahead && !skip(ahead) && hits.includes(ahead)) return ahead
-    return null
-  }
-  const others = hits.filter((piece) => piece !== current)
-  if (others.length === 0) return null
-  if (!trend || others.length === 1) return others[0] ?? null
-  let best = others[0]
+  if (hits.length === 0) return null
+  if (!trend || hits.length === 1) return hits[0] ?? null
+  let best = hits[0]
   if (!best) return null
   let score = alongScore(best, trend)
-  for (const piece of others) {
+  for (const piece of hits) {
     const value = alongScore(piece, trend)
     if (value > score) {
       best = piece
@@ -329,8 +306,8 @@ export type ReleasePlan =
   | { kind: 'snap' }
 
 /**
- * Already out along the locked axis eliminates at once.
- * A piece still on the board slides on only while the recent window is still fast on that axis.
+ * A cube center past the board on the locked axis eliminates when that exit is clear.
+ * Still on the board: slide out only while the recent window is fast on that axis.
  * Anything else returns to a cell.
  */
 export function planRelease(
@@ -377,8 +354,8 @@ export function gridSnap(piece: StagePiece, pieces: readonly StagePiece[]): { x:
 }
 
 /**
- * Past the board on `side`, at least one cell from the nearest on-board landing,
- * and the rest of that exit is clear. A shorter nudge can still return.
+ * A cube center is past the board on `side`, and the rest of that exit is clear.
+ * A piece still short of that center can return.
  */
 export function canLeave(
   piece: StagePiece,
@@ -387,9 +364,7 @@ export function canLeave(
   x = piece.anchor.position.x,
   y = piece.anchor.position.y,
 ): boolean {
-  if (!crossesEdge(piece, x, y, side.axis, side.sign)) return false
-  const home = gridSnap(piece, pieces)
-  if (Math.hypot(home.x - x, home.y - y) < CELL) return false
+  if (!centerPastEdge(piece, x, y, side.axis, side.sign)) return false
   const dist = exitDistance(piece, x, y, side.axis, side.sign)
   if (dist <= 0.01) return true
   const dx = side.axis === 'x' ? side.sign * dist : 0

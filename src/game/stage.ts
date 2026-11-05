@@ -143,10 +143,11 @@ function eachCube(
 }
 
 /**
- * True when any cube has crossed that board edge.
+ * True when any cube center has passed that board edge.
+ * The piece is then halfway off, so a release can leave without another full cell.
  * +x is east, −x is west, +y is north (screen up), −y is south.
  */
-export function crossesEdge(
+export function centerPastEdge(
   piece: StagePiece,
   x: number,
   y: number,
@@ -154,14 +155,15 @@ export function crossesEdge(
   sign: number,
 ): boolean {
   const board = boardRect()
-  let crossed = false
-  eachCube(piece, x, y, (rect) => {
-    if (axis === 'x' && sign > 0 && rect.right > board.maxX) crossed = true
-    if (axis === 'x' && sign < 0 && rect.left < board.minX) crossed = true
-    if (axis === 'y' && sign > 0 && rect.top > board.maxY) crossed = true
-    if (axis === 'y' && sign < 0 && rect.bottom < board.minY) crossed = true
-  })
-  return crossed
+  for (const local of piece.locals) {
+    const cx = x + local.x
+    const cy = y + local.y
+    if (axis === 'x' && sign > 0 && cx > board.maxX) return true
+    if (axis === 'x' && sign < 0 && cx < board.minX) return true
+    if (axis === 'y' && sign > 0 && cy > board.maxY) return true
+    if (axis === 'y' && sign < 0 && cy < board.minY) return true
+  }
+  return false
 }
 
 /** Distance along a signed axis until every cube is past that edge. */

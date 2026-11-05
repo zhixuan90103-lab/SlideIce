@@ -70,7 +70,7 @@ npm run ios
 - 玩法：按 [docs/GAME.md](docs/GAME.md) 写入 `src/game/`，`src/main.ts` 只负责启动  
 - 画面：按 [docs/STAGE.md](docs/STAGE.md)。没有底板。格子缝保持 4，不随格子平面拉伸  
 - 保留：adapt / create-renderer / haptics / plugins / `base`  
-- 触控：只走 `clientToDesign`，用舞台边框换设计坐标（见 GAME.md §2）。未抓住时丢掉设计区外的点。挡住时只问 `sweep`，停在这段路程的第一次接触，不穿过去。棋盘列数、行数、占格和镜头距离 `dist` 只写 `public/levels/*.json`。没有占格的关卡不保留。同一问题的入口见 GAME.md §5。操作优先于动画（GAME.md §0）
+- 触控：只走 `clientToDesign`，用舞台边框换设计坐标（见 GAME.md §2）。未抓住时丢掉设计区外的点。挡住时只问 `sweep`，停在这段路程的第一次接触，不穿过去。选中后这只手指不换块。有一格中心越出且出口通畅才立刻消除。没有关卡文件就回到第 1 关。棋盘列数、行数、占格和镜头距离 `dist` 只写 `public/levels/*.json`。没有占格的关卡不保留。同一问题的入口见 GAME.md §5。操作优先于动画（GAME.md §0）
 - 震动：时机和参数只写 GAME.md §2.4，调用只走 `pulseHaptic`
 - 音效：按 `docs/AUDIO.md` 接入；禁止热路径 `new Audio()` / 每发一次桥。第一关不接  
 

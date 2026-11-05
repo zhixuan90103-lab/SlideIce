@@ -19,10 +19,9 @@ import {
   HOME_BAND,
   followHold,
   recentAxis,
-  replacementTarget,
+  grabTarget,
   gridSnap,
   planRelease,
-  coversPiece,
   pieceAt,
   releaseFinger,
   rememberFinger,
@@ -188,14 +187,6 @@ export function mountSlideGame(
     gesture.grabY = gesture.finger.y
   }
 
-  /** Pushing into a stop keeps the grab. Only a finger behind the piece lets go. */
-  const stillHeld = (piece: StagePiece, finger: Finger, axis: AxisLock) => {
-    if (coversPiece(piece, finger.x, finger.y)) return true
-    const pieceAlong = axis.axis === 'x' ? piece.anchor.position.x : piece.anchor.position.y
-    const fingerAlong = axis.axis === 'x' ? finger.x : -finger.y
-    return (fingerAlong - pieceAlong) * axis.sign >= 0
-  }
-
   const flatten = (piece: StagePiece) => {
     rocks.delete(piece)
     piece.mesh.rotation.x = 0
@@ -349,29 +340,15 @@ export function mountSlideGame(
               : piece.anchor.position.y - gesture.originY
           if (turned && (Math.abs(along) <= HOME_BAND || moved.blocked)) turnAxis(piece, turned)
         }
-        const next = replacementTarget(
-          piece,
-          pieces,
-          gesture.trend,
-          gesture.finger.x,
-          gesture.finger.y,
-          isLanding,
-        )
-        if (piece && next && next !== piece) {
-          const dropped = piece
-          const force = gesture.trend
-          gesture.piece = null
-          held = null
-          sit(dropped, force)
-          takePiece(next, gesture.finger.x, gesture.finger.y, false)
-        } else if (piece && moved.blocked && moved.axis && !stillHeld(piece, gesture.finger, moved.axis)) {
-          const dropped = piece
-          const force = gesture.trend
-          gesture.piece = null
-          held = null
-          sit(dropped, force)
-        } else if (!gesture.piece && next) {
-          takePiece(next, gesture.finger.x, gesture.finger.y, false)
+        if (!piece) {
+          const next = grabTarget(
+            pieces,
+            gesture.trend,
+            gesture.finger.x,
+            gesture.finger.y,
+            isLanding,
+          )
+          if (next) takePiece(next, gesture.finger.x, gesture.finger.y, false)
         }
       }
       for (let i = landings.length - 1; i >= 0; i--) {

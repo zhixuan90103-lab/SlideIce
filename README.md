@@ -22,7 +22,7 @@ npm run dev
 # → http://127.0.0.1:5193/
 ```
 
-应看到：桌面手机框、5×5 六色滑块、右上角 **手机/Pad** 切换。没有墙，块只互相挡住。按下立刻抬起并描边。规则在 [docs/GAME.md](./docs/GAME.md)，画面在 [docs/STAGE.md](./docs/STAGE.md)。
+应看到：桌面手机框、当前关卡的滑块、右上角 **手机/Pad** 切换。第 1 关是 3×5。没有墙，块只互相挡住。按下立刻抬起并描边。规则在 [docs/GAME.md](./docs/GAME.md)，画面在 [docs/STAGE.md](./docs/STAGE.md)。
 
 ## 合并了什么
 

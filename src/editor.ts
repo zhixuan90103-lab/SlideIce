@@ -1,4 +1,4 @@
-import { PIECE_PALETTE, colorHex, parseLevel, useBoard, type LevelFile } from './game/level'
+import { PIECE_PALETTE, colorHex, useBoard, type LevelFile } from './game/level'
 import { levelCount, readLevel } from './game/levels'
 import { DIST_MAX, DIST_MIN, openDistance } from './game/look'
 
@@ -66,7 +66,8 @@ function serialize(level: LevelFile): unknown {
 async function open(next: number): Promise<void> {
   count = await levelCount()
   index = Math.min(Math.max(1, next), count)
-  const level = parseLevel(await readLevel(index))
+  const level = await readLevel(index)
+  if (!level) return
   draft = {
     cols: level.cols,
     rows: level.rows,

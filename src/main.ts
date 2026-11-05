@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import { Capacitor } from '@capacitor/core';
 import { DIST_MAX, DIST_MIN, FRAME_DIST, STAGE_BG, STAGE_BG_CSS, look, openDistance } from './game/look';
-import { levelCount, readLevel, writeLevelDist } from './game/levels';
+import { openLevel, writeLevelDist } from './game/levels';
 import { mountResult } from './game/result';
 import { mountSlideGame, type SlideGame } from './game/play';
 import {
@@ -226,9 +226,9 @@ async function boot(): Promise<void> {
   game.setLights(look.key, look.keyAz, look.keyEl, look.fill, look.fillAz, look.fillEl, look.ambient);
 
   async function showLevel(index: number): Promise<void> {
-    const count = await levelCount();
-    const next = ((index - 1) % count + count) % count + 1;
-    const level = await readLevel(next);
+    const opened = await openLevel(index);
+    if (!opened) return;
+    const { index: next, level } = opened;
     levelIndex = next;
     result.hide();
     game?.load(level);

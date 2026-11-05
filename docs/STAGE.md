@@ -7,14 +7,14 @@
 | 模块 | 职责 |
 |------|------|
 | `src/game/level.ts` | 关卡文件的形状。`cols`、`rows`、`dist` 和占格写在 `public/levels/*.json`。 |
-| `src/game/levels.ts` | 读关卡。开发时 `writeLevelDist` 只改当前关的 `dist`。 |
+| `src/game/levels.ts` | 读关卡。打开第几关只问 `openLevel`。开发时 `writeLevelDist` 只改当前关的 `dist`。 |
 | `src/game/look.ts` | 光、相机、块尺寸，以及 `openDistance`、`designToBoard`、`boardToStage`、`viewBottomWorld`。 |
-| `src/game/stage.ts` | 纯色背景、光、阴影、浅色格子、六块挤出体、拿起描边。格子、越边和轮廓偏移也在这里。没有底板，没有墙。 |
-| `src/game/play.ts` | 指针、抬起、同时进行的多块落格。入口是 `mountSlideGame`。 |
-| `src/game/slide.ts` | 一条手指缓冲、锁轴、唯一的碰撞扫描 `sweep`、松手的消除、滑出或落格。 |
+| `src/game/stage.ts` | 纯色背景、光、阴影、浅色格子、挤出体、拿起描边。格子、一格中心是否越出、轮廓偏移也在这里。没有底板，没有墙。 |
+| `src/game/play.ts` | 指针、抬起、落格队列。选中后不换块。入口是 `mountSlideGame`。 |
+| `src/game/slide.ts` | 一条手指缓冲、锁轴、`grabTarget`、唯一的碰撞扫描 `sweep`、松手的消除、滑出或落格。 |
 | `src/game/rock.ts` | 锚点落到格子之后的一次晃动。规则见 [GAME.md](GAME.md) §2.3。 |
 | `src/game/hint.ts` | 松手就会脱离时的发亮。不挡操作。 |
-| `src/game/shatter.ts` | 离场碎块的尺寸和每格数量。不挡操作。规则见 [GAME.md](GAME.md) §3。 |
+| `src/game/shatter.ts` | 离场碎块的尺寸和每格数量。每次 `makeShatter` 新建网格。不挡操作。规则见 [GAME.md](GAME.md) §3。 |
 | `src/game/praise.ts` | 离场文字。只往上飘。不挡操作。 |
 | `src/game/hapticFeel.ts` | 拿起、撞上、发亮、离场四下短震。参数见 [GAME.md](GAME.md) §2.4。 |
 | `src/main.ts` | 启动、透视相机、设置按钮。 |

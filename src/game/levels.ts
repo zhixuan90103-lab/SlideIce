@@ -1,4 +1,4 @@
-import { FIRST_LEVEL, parseLevel, type LevelFile } from './level'
+import { parseLevel, type LevelFile } from './level'
 
 /** JSON files under public/levels, included in the phone build. */
 const packed = import.meta.glob('../../public/levels/*.json', {
@@ -27,14 +27,29 @@ export async function levelCount(): Promise<number> {
   return Math.max(1, count)
 }
 
-export async function readLevel(index: number): Promise<LevelFile> {
+/** The requested file, or level 1 when that file is missing. */
+export async function openLevel(index: number): Promise<{ index: number; level: LevelFile } | null> {
+  const count = await levelCount()
+  const wrapped = ((index - 1) % count + count) % count + 1
+  const level = await readLevel(wrapped)
+  if (level) return { index: wrapped, level }
+  if (wrapped === 1) return null
+  const first = await readLevel(1)
+  return first ? { index: 1, level: first } : null
+}
+
+export async function readLevel(index: number): Promise<LevelFile | null> {
   if (import.meta.env.DEV) {
     const response = await fetch(`./levels/${index}.json`, { cache: 'no-store' })
-    if (response.ok) return parseLevel(await response.json())
+    if (!response.ok) return null
+    try {
+      return parseLevel(await response.json())
+    } catch {
+      return null
+    }
   }
   const found = Object.entries(packed).find(([path]) => packedIndex(path) === index)
-  if (found) return parseLevel(found[1])
-  return parseLevel(FIRST_LEVEL)
+  return found ? parseLevel(found[1]) : null
 }
 
 /** Dev only. Writes `dist` on the level file without replacing the pieces. */
